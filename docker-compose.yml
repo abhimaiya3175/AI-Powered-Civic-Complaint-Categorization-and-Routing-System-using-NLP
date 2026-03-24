@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Maiya@21
+      POSTGRES_DB: bbmp_complaints
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_USER=postgres
+      - DB_PASSWORD=Maiya@21
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=bbmp_complaints
+      - SECRET_KEY=bbmp_secret_2025
+      - JWT_ALGORITHM=HS256
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=bbmp2025
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+
+volumes:
+  pgdata:

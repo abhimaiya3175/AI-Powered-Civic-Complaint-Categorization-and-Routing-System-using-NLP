@@ -1,0 +1,48 @@
+# ============================================
+# BBMP Civic Complaint System — .gitignore
+# ============================================
+
+# ── Python ─────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+.env
+
+# ── Node / Frontend ────────────────────────
+node_modules/
+civic-frontend/dist/
+civic-frontend/dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Runtime / Generated ────────────────────
+uploads/
+bbmp_complaints.log
+complaints.db
+complaints.db.bak
+*.wav
+*.webm
+response_submit.json
+
+# ── OS / IDE ───────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── Docker ─────────────────────────────────
+docker-compose.override.yml
