@@ -53,3 +53,6 @@ Thumbs.db
 
 # ── Docker ─────────────────────────────────
 docker-compose.override.yml
+
+# ── Local Copilot Instructions ─────────────
+.github/instructions/location-authenticity.instructions.md
