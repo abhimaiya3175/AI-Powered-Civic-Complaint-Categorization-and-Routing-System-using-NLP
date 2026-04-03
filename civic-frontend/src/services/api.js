@@ -1,11 +1,29 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
 /**
- * Submit a voice complaint (audio file upload).
+ * Submit a complaint with mandatory live location and optional media evidence.
  */
-export const submitComplaint = async (audioFile) => {
+export const submitComplaint = async ({
+  audioFile,
+  imageFile,
+  liveLatitude,
+  liveLongitude,
+  liveLocationTimestamp,
+  textNote,
+}) => {
   const formData = new FormData();
-  formData.append('file', audioFile);
+  if (audioFile) {
+    formData.append('file', audioFile);
+  }
+  if (imageFile) {
+    formData.append('image', imageFile);
+  }
+  if (textNote) {
+    formData.append('text_note', textNote);
+  }
+  formData.append('live_latitude', String(liveLatitude));
+  formData.append('live_longitude', String(liveLongitude));
+  formData.append('live_location_timestamp', liveLocationTimestamp);
 
   const response = await fetch(`${API_BASE}/submit-complaint`, {
     method: 'POST',
@@ -104,6 +122,10 @@ export const loginAdmin = async (username, password) => {
 /**
  * Build the full URL for an audio file so <audio> can play it.
  */
-export const getAudioUrl = (audioPath) => {
-  return `${API_BASE}/${audioPath}`;
+export const getAudioUrl = (audioPath, token) => {
+  if (!audioPath) return '';
+  const filename = audioPath.split('/').pop();
+  const baseUrl = `${API_BASE}/uploads/${filename}`;
+  if (!token) return baseUrl;
+  return `${baseUrl}?token=${encodeURIComponent(token)}`;
 };

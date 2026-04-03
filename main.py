@@ -1,14 +1,18 @@
 import os
 import uuid
 import logging
-from datetime import datetime
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Query
+import mimetypes
+from datetime import datetime, timezone
+from typing import Optional
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, func
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, func, inspect, text as sql_text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from PIL import Image
+from PIL.ExifTags import GPSTAGS
 import spacy
 import pickle
 import whisper
@@ -50,6 +54,10 @@ ALLOWED_AUDIO_TYPES = {
     "audio/mp4", "audio/aac",
 }
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".ogg", ".webm", ".flac", ".m4a", ".aac"}
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png"}
+GPS_TOLERANCE_METERS = 100.0
+MAX_IMAGE_AGE_SECONDS = 10 * 60
 
 # Prefer explicit DATABASE_URL, otherwise construct from DB_* values.
 DATABASE_URL = os.getenv(
@@ -78,10 +86,49 @@ class Complaint(Base):
     language = Column(String)
     category = Column(String)
     location = Column(String)
+    live_latitude = Column(Float)
+    live_longitude = Column(Float)
+    live_location_timestamp = Column(DateTime)
+    image_path = Column(String)
+    image_exif_latitude = Column(Float)
+    image_exif_longitude = Column(Float)
+    image_exif_timestamp = Column(DateTime)
+    image_live_distance_meters = Column(Float)
+    trust_level = Column(String, default="medium")
+    verification_mode = Column(String, default="manual_review")
     status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_complaints_schema_upgrades():
+    """Add newly introduced columns for existing databases without migrations."""
+    required_columns = {
+        "live_latitude": "FLOAT",
+        "live_longitude": "FLOAT",
+        "live_location_timestamp": "TIMESTAMP",
+        "image_path": "VARCHAR",
+        "image_exif_latitude": "FLOAT",
+        "image_exif_longitude": "FLOAT",
+        "image_exif_timestamp": "TIMESTAMP",
+        "image_live_distance_meters": "FLOAT",
+        "trust_level": "VARCHAR DEFAULT 'medium'",
+        "verification_mode": "VARCHAR DEFAULT 'manual_review'",
+    }
+
+    inspector = inspect(engine)
+    if "complaints" not in inspector.get_table_names():
+        return
+
+    existing_columns = {col["name"] for col in inspector.get_columns("complaints")}
+    with engine.begin() as conn:
+        for column_name, ddl in required_columns.items():
+            if column_name not in existing_columns:
+                conn.execute(sql_text(f"ALTER TABLE complaints ADD COLUMN {column_name} {ddl}"))
+
+
+ensure_complaints_schema_upgrades()
 
 # ====================== ML / NLP LOAD ======================
 logger.info("Loading model_bbmp.pkl …")
@@ -99,7 +146,7 @@ except OSError:
 
 logger.info("Loading Whisper small …")
 whisper_model = whisper.load_model("small")
-logger.info("All models loaded successfully ✓")
+logger.info("All models loaded successfully")
 
 # ====================== FASTAPI APP ======================
 app = FastAPI(title="Multilingual Civic Complaint System (BBMP)")
@@ -152,6 +199,108 @@ def validate_audio_file(file: UploadFile):
         )
     if content_type and content_type not in ALLOWED_AUDIO_TYPES:
         logger.warning(f"Rejected file upload: {file.filename} — not an audio file")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid audio content type '{content_type}'.",
+        )
+
+
+def validate_image_file(file: UploadFile):
+    """Reject uploads that are not accepted image files."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    content_type = (file.content_type or "").lower()
+
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid image extension '{ext}'. Allowed: {', '.join(sorted(ALLOWED_IMAGE_EXTENSIONS))}",
+        )
+    if content_type and content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid image content type '{content_type}'.",
+        )
+
+
+def parse_client_timestamp(timestamp_value: str, field_name: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(timestamp_value.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}. Use ISO-8601 format.")
+
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def convert_dms_to_decimal(dms_value, ref) -> float:
+    degrees = float(dms_value[0])
+    minutes = float(dms_value[1])
+    seconds = float(dms_value[2])
+    decimal = degrees + (minutes / 60.0) + (seconds / 3600.0)
+    if ref in ("S", "W"):
+        decimal = -decimal
+    return decimal
+
+
+def extract_exif_location_and_time(image_path: str) -> tuple[float, float, datetime]:
+    try:
+        with Image.open(image_path) as image:
+            exif = image.getexif()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to read image metadata: {exc}")
+
+    if not exif:
+        raise HTTPException(status_code=400, detail="Image must contain EXIF metadata with GPS coordinates and timestamp.")
+
+    gps_info = exif.get(34853)
+    exif_timestamp = exif.get(36867) or exif.get(306)
+
+    if not gps_info:
+        raise HTTPException(status_code=400, detail="Image EXIF GPS metadata is missing.")
+    if not exif_timestamp:
+        raise HTTPException(status_code=400, detail="Image EXIF timestamp is missing.")
+
+    if isinstance(exif_timestamp, bytes):
+        exif_timestamp = exif_timestamp.decode(errors="ignore")
+
+    gps_data = {GPSTAGS.get(tag, tag): value for tag, value in gps_info.items()}
+    lat = gps_data.get("GPSLatitude")
+    lat_ref = gps_data.get("GPSLatitudeRef")
+    lon = gps_data.get("GPSLongitude")
+    lon_ref = gps_data.get("GPSLongitudeRef")
+
+    if isinstance(lat_ref, bytes):
+        lat_ref = lat_ref.decode(errors="ignore")
+    if isinstance(lon_ref, bytes):
+        lon_ref = lon_ref.decode(errors="ignore")
+
+    if not lat or not lon or lat_ref not in ("N", "S") or lon_ref not in ("E", "W"):
+        raise HTTPException(status_code=400, detail="Image EXIF GPS metadata is invalid.")
+
+    try:
+        image_lat = convert_dms_to_decimal(lat, lat_ref)
+        image_lon = convert_dms_to_decimal(lon, lon_ref)
+        image_timestamp = datetime.strptime(str(exif_timestamp), "%Y:%m:%d %H:%M:%S")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Image EXIF metadata is malformed.")
+
+    return image_lat, image_lon, image_timestamp
+
+
+def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    earth_radius = 6371000.0
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(d_lat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(d_lon / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return earth_radius * c
 
 # ====================== ENDPOINTS ======================
 
@@ -172,67 +321,103 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 # ---------- Submit Complaint ----------
 @app.post("/submit-complaint")
-async def submit_complaint(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def submit_complaint(
+    file: Optional[UploadFile] = File(default=None),
+    image: Optional[UploadFile] = File(default=None),
+    live_latitude: float = Form(...),
+    live_longitude: float = Form(...),
+    live_location_timestamp: str = Form(...),
+    text_note: str = Form(default=""),
+    db: Session = Depends(get_db),
+):
     """
     Full NLP pipeline: receive audio → transcribe → detect language →
     translate → classify → extract location → save to DB.
     """
-    # 0. Validate file extension
-    ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".webm", ".mp4"}
-    ALLOWED_CONTENT_TYPES = {
-        "audio/wav", "audio/wave", "audio/mpeg",
-        "audio/mp4", "audio/ogg", "audio/webm",
-        "video/webm", "application/octet-stream"
-    }
+    # 0. Validate live location fields (mandatory)
+    if not (-90 <= live_latitude <= 90) or not (-180 <= live_longitude <= 180):
+        raise HTTPException(status_code=400, detail="Live location coordinates are invalid.")
 
-    file_ext = os.path.splitext(file.filename)[-1].lower()
-    if file_ext not in ALLOWED_EXTENSIONS:
-        logger.warning(f"Rejected file: {file.filename} — invalid extension {file_ext}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type '{file_ext}'. Allowed: {ALLOWED_EXTENSIONS}"
-        )
+    live_location_at = parse_client_timestamp(live_location_timestamp, "live_location_timestamp")
 
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
-        logger.warning(f"Rejected file: {file.filename} — invalid content type {file.content_type}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid content type '{file.content_type}'."
-        )
+    submitted_text = (text_note or "").strip()
+    if file is None and not submitted_text:
+        raise HTTPException(status_code=400, detail="Provide either audio or complaint text along with live location.")
+
+    if file is not None:
+        validate_audio_file(file)
+    if image is not None:
+        validate_image_file(image)
 
     MAX_FILE_SIZE_MB = 25
-    contents = await file.read()
-    if len(contents) > MAX_FILE_SIZE_MB * 1024 * 1024:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large. Maximum allowed size is {MAX_FILE_SIZE_MB}MB."
-        )
-    await file.seek(0)
+    if file is not None:
+        contents = await file.read()
+        if len(contents) > MAX_FILE_SIZE_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Maximum allowed size is {MAX_FILE_SIZE_MB}MB."
+            )
+        await file.seek(0)
 
-    # 1. Save audio file to /uploads folder
+    if image is not None:
+        image_contents = await image.read()
+        if len(image_contents) > MAX_FILE_SIZE_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Image too large. Maximum allowed size is {MAX_FILE_SIZE_MB}MB."
+            )
+        await image.seek(0)
+
+    # 1. Save evidence files
     os.makedirs("uploads", exist_ok=True)
-    file_id = str(uuid.uuid4())
-    ext = os.path.splitext(file.filename or ".wav")[1] or ".wav"
-    audio_path = f"uploads/{file_id}{ext}"
+    audio_path = None
+    image_path = None
+    if file is not None:
+        audio_id = str(uuid.uuid4())
+        audio_ext = os.path.splitext(file.filename or ".wav")[1] or ".wav"
+        audio_path = f"uploads/{audio_id}{audio_ext}"
+        with open(audio_path, "wb") as f:
+            f.write(await file.read())
+        logger.info(f"Received audio file: {file.filename}")
 
-    with open(audio_path, "wb") as f:
-        f.write(await file.read())
-    logger.info(f"Received audio file: {file.filename}")
+    if image is not None:
+        image_id = str(uuid.uuid4())
+        image_ext = os.path.splitext(image.filename or ".jpg")[1] or ".jpg"
+        image_path = f"uploads/{image_id}{image_ext}"
+        with open(image_path, "wb") as f:
+            f.write(await image.read())
+        logger.info(f"Received image evidence: {image.filename}")
 
-    # 2 & 3. Transcribe and detect language using Whisper
-    try:
-        result = whisper_model.transcribe(audio_path)
-        transcribed_text = result["text"].strip()
-        detected_language = result.get("language", "en")
-        logger.info(f"Transcribed: {transcribed_text} | Language: {detected_language}")
-    except Exception as e:
-        logger.error(f"Whisper transcription failed for {audio_path}: {e}")
-        if "WinError 2" in str(e) or "ffmpeg" in str(e).lower():
-            logger.warning("FFmpeg not found. Using mock transcription.")
-            transcribed_text = "There is a huge garbage dump near the park in Indiranagar."
-            detected_language = "en"
-        else:
+    # 2 & 3. Derive complaint text from audio and/or text input
+    transcribed_text = submitted_text
+    detected_language = "en"
+    if audio_path:
+        try:
+            result = whisper_model.transcribe(audio_path)
+            audio_text = result["text"].strip()
+            detected_language = result.get("language", "en")
+            if not audio_text and not submitted_text:
+                logger.warning(f"No speech detected in uploaded audio: {audio_path}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="No clear speech detected in audio. Please record again and speak closer to the microphone."
+                )
+            transcribed_text = f"{submitted_text} {audio_text}".strip() if submitted_text else audio_text
+            logger.info(f"Transcribed: {audio_text} | Language: {detected_language}")
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise
+            logger.error(f"Whisper transcription failed for {audio_path}: {e}")
+            if "WinError 2" in str(e) or "ffmpeg" in str(e).lower():
+                logger.warning("FFmpeg not found. Cannot transcribe audio without FFmpeg.")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Audio transcription failed: FFmpeg is not installed or not found in PATH. Please install FFmpeg and retry."
+                )
             raise HTTPException(status_code=500, detail="Audio transcription failed. Please try again.")
+
+    if not transcribed_text:
+        raise HTTPException(status_code=400, detail="Complaint text is required.")
 
     # 4. Translate to English using deep-translator
     try:
@@ -248,29 +433,69 @@ async def submit_complaint(file: UploadFile = File(...), db: Session = Depends(g
         translated_text = transcribed_text
         logger.warning("Using original text as fallback due to translation failure.")
 
-    # 5 & 6. Classify complaint + Extract location using spaCy NER
+    # 5 & 6. Classify complaint and anchor location to live coordinates
     try:
         category = clf.predict(vectorizer.transform([translated_text]))[0]
-        doc = nlp(translated_text)
-        location = next(
-            (ent.text for ent in doc.ents if ent.label_ in ("GPE", "LOC", "FAC")),
-            "Unknown"
-        )
+        location = f"{live_latitude:.6f}, {live_longitude:.6f}"
         logger.info(f"Category: {category} | Location: {location}")
     except Exception as e:
         logger.error(f"Classification or NER failed: {e}")
         category = "Others"
-        location = "Unknown"
+        location = f"{live_latitude:.6f}, {live_longitude:.6f}"
 
-    # 7. Save to database
+    # 7. Validate optional image evidence authenticity and assign trust level
+    image_exif_latitude = None
+    image_exif_longitude = None
+    image_exif_timestamp = None
+    image_live_distance_meters = None
+    trust_level = "medium"
+    verification_mode = "manual_review"
+    status = "pending"
+
+    if image_path:
+        image_exif_latitude, image_exif_longitude, image_exif_timestamp = extract_exif_location_and_time(image_path)
+        image_live_distance_meters = haversine_distance_meters(
+            live_latitude,
+            live_longitude,
+            image_exif_latitude,
+            image_exif_longitude,
+        )
+        if image_live_distance_meters > GPS_TOLERANCE_METERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Image GPS does not match live location within {int(GPS_TOLERANCE_METERS)} meters."
+            )
+
+        image_age_seconds = (datetime.utcnow() - image_exif_timestamp).total_seconds()
+        if image_age_seconds > MAX_IMAGE_AGE_SECONDS:
+            raise HTTPException(
+                status_code=400,
+                detail="Image metadata timestamp is older than 10 minutes. Capture a fresh photo."
+            )
+
+        trust_level = "high"
+        verification_mode = "auto_verified"
+        status = "Verified"
+
+    # 8. Save to database
     complaint = Complaint(
         audio_path=audio_path,
+        image_path=image_path,
         original_text=transcribed_text,
         translated_text=translated_text,
         language=detected_language,
         category=category,
         location=location,
-        status="pending",
+        live_latitude=live_latitude,
+        live_longitude=live_longitude,
+        live_location_timestamp=live_location_at,
+        image_exif_latitude=image_exif_latitude,
+        image_exif_longitude=image_exif_longitude,
+        image_exif_timestamp=image_exif_timestamp,
+        image_live_distance_meters=image_live_distance_meters,
+        trust_level=trust_level,
+        verification_mode=verification_mode,
+        status=status,
     )
     db.add(complaint)
     db.commit()
@@ -282,21 +507,53 @@ async def submit_complaint(file: UploadFile = File(...), db: Session = Depends(g
         "id": complaint.id,
         "category": complaint.category,
         "location": complaint.location,
+        "live_latitude": complaint.live_latitude,
+        "live_longitude": complaint.live_longitude,
+        "trust_level": complaint.trust_level,
+        "verification_mode": complaint.verification_mode,
+        "image_live_distance_meters": complaint.image_live_distance_meters,
         "translated_text": complaint.translated_text,
         "status": complaint.status,
     }
 
 # ---------- Audio File Serving ----------
 @app.get("/uploads/{filename}")
-async def serve_audio(filename: str, current_user: str = Depends(get_current_user)):
+async def serve_audio(
+    filename: str,
+    request: Request,
+    token: Optional[str] = Query(default=None),
+):
+    # Accept token from query param (audio src use-case) or Authorization header.
+    access_token = token
+    if not access_token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            access_token = auth_header.split(" ", 1)[1].strip()
+
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Missing authentication token")
+
+    try:
+        payload = jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
     file_path = os.path.join("uploads", filename)
     if not os.path.exists(file_path):
         logger.warning(f"Audio file not found: {filename}")
         raise HTTPException(status_code=404, detail="Audio file not found.")
+
+    media_type, _ = mimetypes.guess_type(file_path)
+    if not media_type:
+        media_type = "application/octet-stream"
+
     logger.info(f"Serving audio file: {filename}")
     return FileResponse(
         path=file_path,
-        media_type="audio/wav",
+        media_type=media_type,
         filename=filename
     )
 

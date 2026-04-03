@@ -2,7 +2,7 @@
 
 # 🏛️ BBMP Civic Complaint System
 
-**A Multilingual, AI-Powered Voice Complaint Platform for Bengaluru Citizens**
+**A Multilingual, AI-Powered Civic Complaint Platform with Live Location and Evidence Authenticity Checks**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
@@ -18,7 +18,10 @@
 | Feature | Description |
 |---------|-------------|
 | 🎤 **Voice Capture** | Citizens record complaints in **Kannada**, **Hindi**, or **English** |
+| 📍 **Live Location Capture** | Complaint submission requires real-time GPS coordinates from the device |
+| 📷 **Image Authenticity** | Camera/gallery image evidence validated via EXIF GPS + timestamp checks |
 | 🤖 **AI Pipeline** | Whisper STT → Google Translate → TF-IDF + Naive Bayes classifier (98.5% acc.) → spaCy NER geo-tagging |
+| 🛡️ **Trust Tiers** | High trust (auto-verified) for valid image+location; medium trust (manual review) for text/audio+location |
 | 🗺️ **Interactive Map** | Leaflet + CartoDB Positron light tiles with color-coded complaint markers |
 | 🔐 **JWT Auth** | Secure admin login with token-based access control |
 | ✅ **HITL Verification** | Admin verifies/edits AI-classified complaints before finalizing |
@@ -85,6 +88,7 @@ Civic Complaint/
 - **Python 3.10+** with `pip`
 - **Node.js 18+** with `npm`
 - **FFmpeg** (for Whisper audio processing)
+- **Device location services** enabled in browser for complaint submission
 - **PostgreSQL 14+** *(optional — falls back to SQLite)*
 
 ### 1. Clone & Setup Backend
@@ -136,6 +140,23 @@ docker-compose up -d db
 
 ---
 
+## 🔐 Authenticity Rules
+
+- Live location is mandatory for all complaint submissions.
+- Submission without live location is rejected.
+- Image evidence is optional, but when provided it must pass backend authenticity checks:
+    - EXIF GPS metadata required.
+    - EXIF timestamp required and must be at most 10 minutes old.
+    - EXIF coordinates must match live location within a 100-meter radius.
+
+Trust policy:
+
+- Image + Live Location → **High trust** (`auto_verified`)
+- Text/Audio + Live Location → **Medium trust** (`manual_review`)
+- No Live Location → **Rejected**
+
+---
+
 ## 🧠 NLP Pipeline
 
 ```
@@ -159,11 +180,22 @@ docker-compose up -d db
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | `POST` | `/login` | ❌ | Admin login → JWT token |
-| `POST` | `/submit-complaint` | ❌ | Upload audio → full NLP pipeline |
+| `POST` | `/submit-complaint` | ❌ | Submit complaint with live location, optional audio/text, optional image evidence |
 | `GET` | `/complaints` | 🔐 | Paginated complaint list |
 | `GET` | `/complaints/stats` | 🔐 | Category & language statistics |
 | `PUT` | `/complaints/{id}/verify` | 🔐 | HITL verify/edit complaint |
-| `GET` | `/uploads/{filename}` | 🔐 | Serve original audio file |
+| `GET` | `/uploads/{filename}` | 🔐 | Serve protected uploaded media (audio/image) |
+
+### `POST /submit-complaint` Form Fields
+
+- `live_latitude` (required)
+- `live_longitude` (required)
+- `live_location_timestamp` (required, ISO-8601)
+- `file` (optional audio file)
+- `text_note` (optional text complaint)
+- `image` (optional evidence image)
+
+At least one of `file` or `text_note` is required.
 
 ---
 

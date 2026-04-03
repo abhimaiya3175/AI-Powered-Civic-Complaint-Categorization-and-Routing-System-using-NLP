@@ -41,6 +41,8 @@ export default function ComplaintList() {
   const pageSize = 10;
 
   const [playingId, setPlayingId] = useState(null);
+  const [audioSources, setAudioSources] = useState({});
+  const [audioLoading, setAudioLoading] = useState({});
   const [geoCache, setGeoCache] = useState({});
 
   /* ── Auth ─────────────────────────────────────────────────────── */
@@ -61,11 +63,14 @@ export default function ComplaintList() {
   };
 
   const handleLogout = () => {
+    Object.values(audioSources).forEach((url) => URL.revokeObjectURL(url));
     setToken('');
     localStorage.removeItem('bbmp_token');
     setLoggedIn(false);
     setComplaints([]);
     setStats(null);
+    setAudioSources({});
+    setAudioLoading({});
   };
 
   /* ── Fetch Data ──────────────────────────────────────────────── */
@@ -119,7 +124,34 @@ export default function ComplaintList() {
   };
 
   /* ── Helpers ─────────────────────────────────────────────────── */
-  const toggleAudio = (id) => setPlayingId(playingId === id ? null : id);
+  const toggleAudio = async (complaint) => {
+    if (playingId === complaint.id) {
+      setPlayingId(null);
+      return;
+    }
+
+    setPlayingId(complaint.id);
+    if (!complaint.audio_path || audioSources[complaint.id]) {
+      return;
+    }
+
+    setAudioLoading((prev) => ({ ...prev, [complaint.id]: true }));
+    try {
+      const response = await fetch(getAudioUrl(complaint.audio_path), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        throw new Error('Unable to load audio file');
+      }
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      setAudioSources((prev) => ({ ...prev, [complaint.id]: blobUrl }));
+    } catch (err) {
+      alert(err.message || 'Failed to load complaint audio');
+    } finally {
+      setAudioLoading((prev) => ({ ...prev, [complaint.id]: false }));
+    }
+  };
 
   const filtered = complaints.filter(
     (c) => filter === 'all' || (c.status || '').toLowerCase() === filter
@@ -337,7 +369,6 @@ export default function ComplaintList() {
           {['all', 'pending', 'verified'].map((f) => (
             <button
               key={f}
-              className={`filter-pill ${filter === f ? 'active' : ''}`}
               onClick={() => setFilter(f)}
             >
               {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
@@ -404,7 +435,7 @@ export default function ComplaintList() {
               {/* Audio */}
               {c.audio_path && (
                 <div className="ccard-audio">
-                  <button className="btn btn-secondary btn-sm" onClick={() => toggleAudio(c.id)}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => toggleAudio(c)}>
                     {playingId === c.id ? (
                       <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Hide Player</>
                     ) : (
@@ -412,7 +443,11 @@ export default function ComplaintList() {
                     )}
                   </button>
                   {playingId === c.id && (
-                    <audio controls autoPlay src={getAudioUrl(c.audio_path)} className="ccard-audio-player" />
+                    audioLoading[c.id] ? (
+                      <p className="ccard-audio-loading">Loading audio...</p>
+                    ) : (
+                      <audio controls autoPlay src={audioSources[c.id] || ''} className="ccard-audio-player" />
+                    )
                   )}
                 </div>
               )}
