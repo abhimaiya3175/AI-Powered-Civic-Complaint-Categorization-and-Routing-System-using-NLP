@@ -6,12 +6,20 @@ import { useNavigate } from 'react-router-dom';
 export default function RecordComplaint() {
   const [recording, setRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState('');
+  const [liveLocation, setLiveLocation] = useState(null);
+  const [locationStatus, setLocationStatus] = useState('Live location required before submission.');
+  const [textNote, setTextNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [duration, setDuration] = useState(0);
+
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const timerRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
   const navigate = useNavigate();
 
   /* ── Recording Controls ──────────────────────────────────────── */
@@ -49,23 +57,103 @@ export default function RecordComplaint() {
   };
 
   useEffect(() => {
-    return () => clearInterval(timerRef.current);
+    return () => {
+      clearInterval(timerRef.current);
+      if (imagePreviewUrl) {
+        URL.revokeObjectURL(imagePreviewUrl);
+      }
+    };
   }, []);
 
   const formatTime = (s) =>
     `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
+  const formatDateTime = (value) => {
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return value;
+    }
+  };
+
+  const captureLiveLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationStatus('Geolocation is not supported in this browser.');
+      return;
+    }
+
+    setLocationStatus('Capturing live location...');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const nextLocation = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          timestamp: new Date().toISOString(),
+        };
+        setLiveLocation(nextLocation);
+        setLocationStatus(
+          `Live location captured: ${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`
+        );
+      },
+      (error) => {
+        setLiveLocation(null);
+        setLocationStatus(`Location access failed: ${error.message}`);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
+  const handleImagePick = (event) => {
+    const nextFile = event.target.files?.[0];
+    if (!nextFile) return;
+
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl);
+    }
+
+    setImageFile(nextFile);
+    setImagePreviewUrl(URL.createObjectURL(nextFile));
+  };
+
   /* ── Submission ──────────────────────────────────────────────── */
   const handleSubmit = async () => {
-    if (!audioBlob) return;
+    const hasAudio = Boolean(audioBlob);
+    const hasText = Boolean(textNote.trim());
+
+    if (!liveLocation) {
+      alert('Live location is required. Please tap Capture Live Location first.');
+      return;
+    }
+    if (!hasAudio && !hasText) {
+      alert('Please provide either voice audio or complaint text.');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const file = new File([audioBlob], 'recording.webm', { type: 'audio/webm' });
-      const response = await submitComplaint(file);
+      const audioFile = hasAudio
+        ? new File([audioBlob], 'recording.webm', { type: 'audio/webm' })
+        : null;
+
+      const response = await submitComplaint({
+        audioFile,
+        imageFile,
+        liveLatitude: liveLocation.latitude,
+        liveLongitude: liveLocation.longitude,
+        liveLocationTimestamp: liveLocation.timestamp,
+        textNote,
+      });
+
       setResult(response);
       setAudioBlob(null);
-    } catch {
-      alert('Failed to submit complaint. Make sure the backend is running.');
+      setImageFile(null);
+      if (imagePreviewUrl) {
+        URL.revokeObjectURL(imagePreviewUrl);
+        setImagePreviewUrl('');
+      }
+      setTextNote('');
+    } catch (err) {
+      alert(err.message || 'Failed to submit complaint. Make sure the backend is running.');
     }
     setSubmitting(false);
   };
@@ -73,6 +161,12 @@ export default function RecordComplaint() {
   const reset = () => {
     setResult(null);
     setAudioBlob(null);
+    setImageFile(null);
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl);
+      setImagePreviewUrl('');
+    }
+    setTextNote('');
     setDuration(0);
   };
 
@@ -106,6 +200,14 @@ export default function RecordComplaint() {
             <div className="result-item">
               <span className="result-label">Status</span>
               <span className="badge badge-pending">{result.status}</span>
+            </div>
+            <div className="result-item">
+              <span className="result-label">Trust Level</span>
+              <span className="result-value">{result.trust_level || 'medium'}</span>
+            </div>
+            <div className="result-item">
+              <span className="result-label">Verification</span>
+              <span className="result-value">{result.verification_mode || 'manual_review'}</span>
             </div>
           </div>
 
@@ -154,6 +256,79 @@ export default function RecordComplaint() {
 
       {/* Voice Capture Card */}
       <div className="voice-capture-card card">
+        <div className="location-block">
+          <div className="location-header">
+            <h3>Live Location</h3>
+            <button className="btn btn-secondary" type="button" onClick={captureLiveLocation}>
+              Capture Live Location
+            </button>
+          </div>
+          <p className="location-status">{locationStatus}</p>
+          {liveLocation && (
+            <p className="location-coords mono">
+              {liveLocation.latitude.toFixed(6)}, {liveLocation.longitude.toFixed(6)}
+              {' · '}
+              {formatDateTime(liveLocation.timestamp)}
+            </p>
+          )}
+        </div>
+
+        <div className="image-block">
+          <h3>Image Evidence</h3>
+          <p className="image-hint">Choose one option. Both buttons are always visible.</p>
+          <div className="image-actions">
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              id="btn-capture-photo"
+            >
+              Capture Photo
+            </button>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => galleryInputRef.current?.click()}
+              id="btn-upload-gallery"
+            >
+              Upload from Gallery
+            </button>
+          </div>
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/jpeg,image/jpg,image/png"
+            capture="environment"
+            onChange={handleImagePick}
+            className="hidden-file-input"
+          />
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/jpeg,image/jpg,image/png"
+            onChange={handleImagePick}
+            className="hidden-file-input"
+          />
+          {imageFile && (
+            <div className="image-preview-card">
+              <img src={imagePreviewUrl} alt="Evidence preview" className="evidence-preview" />
+              <p className="image-file-name">{imageFile.name}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="text-note-block">
+          <label htmlFor="complaint-text" className="result-label">Additional Complaint Text (Optional)</label>
+          <textarea
+            id="complaint-text"
+            rows={2}
+            className="complaint-textarea"
+            value={textNote}
+            onChange={(e) => setTextNote(e.target.value)}
+            placeholder="Describe the issue in text if needed..."
+          />
+        </div>
+
         {!audioBlob && !recording && (
           <div className="mic-area">
             <button className="mic-button" onClick={startRecording} id="btn-start-recording" aria-label="Start recording">
@@ -224,6 +399,14 @@ export default function RecordComplaint() {
                 )}
               </button>
             </div>
+          </div>
+        )}
+
+        {!audioBlob && !recording && (
+          <div className="submit-only-actions">
+            <button className="btn btn-primary btn-lg" onClick={handleSubmit} disabled={submitting} id="btn-submit-complaint-no-audio">
+              {submitting ? 'Processing…' : 'Submit with Current Details'}
+            </button>
           </div>
         )}
       </div>

@@ -80,7 +80,7 @@
 /* ── Voice Capture Card ────────────────────────────────────────── */
 .voice-capture-card {
   width: 100%;
-  max-width: 480px;
+  max-width: 620px;
   padding: var(--space-2xl);
   text-align: center;
   background: var(--color-surface);
@@ -102,6 +102,97 @@
     transparent 70%
   );
   pointer-events: none;
+}
+
+.location-block,
+.image-block,
+.text-note-block {
+  position: relative;
+  z-index: 1;
+  text-align: left;
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+}
+
+.location-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: 0.5rem;
+}
+
+.location-header h3,
+.image-block h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--color-text-heading);
+}
+
+.location-status,
+.image-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.location-coords {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-body);
+}
+
+.image-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: 0.75rem;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.image-preview-card {
+  margin-top: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.evidence-preview {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  display: block;
+}
+
+.image-file-name {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.complaint-textarea {
+  width: 100%;
+  min-height: 72px;
+  margin-top: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.625rem 0.75rem;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  color: var(--color-text-body);
+  resize: vertical;
+  background: #fff;
+}
+
+.submit-only-actions {
+  margin-top: var(--space-sm);
 }
 
 /* ── Mic Button ────────────────────────────────────────────────── */
@@ -333,6 +424,17 @@
   display: flex;
   gap: var(--space-md);
   justify-content: center;
+}
+
+@media (max-width: 640px) {
+  .location-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .image-actions {
+    flex-direction: column;
+  }
 }
 
 /* ── How It Works ──────────────────────────────────────────────── */
