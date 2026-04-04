@@ -14,12 +14,16 @@ export default function RecordComplaint() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [duration, setDuration] = useState(0);
+  const [cameraActive, setCameraActive] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const timerRef = useRef(null);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const cameraStreamRef = useRef(null);
+  const canvasRef = useRef(null);
   const navigate = useNavigate();
 
   /* ── Recording Controls ──────────────────────────────────────── */
@@ -61,6 +65,9 @@ export default function RecordComplaint() {
       clearInterval(timerRef.current);
       if (imagePreviewUrl) {
         URL.revokeObjectURL(imagePreviewUrl);
+      }
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
@@ -113,6 +120,55 @@ export default function RecordComplaint() {
 
     setImageFile(nextFile);
     setImagePreviewUrl(URL.createObjectURL(nextFile));
+  };
+
+  /* ── Camera Capture (Desktop Webcam) ───────────────────────── */
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      cameraStreamRef.current = stream;
+      setCameraActive(true);
+      // Wait for the video element to mount, then attach the stream
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+      }, 100);
+    } catch (err) {
+      alert('Could not access camera. Please grant camera permission or use "Upload from Gallery" instead.');
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach(track => track.stop());
+      cameraStreamRef.current = null;
+    }
+    setCameraActive(false);
+  };
+
+  const takeSnapshot = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' });
+        if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+        setImageFile(file);
+        setImagePreviewUrl(URL.createObjectURL(blob));
+        stopCamera();
+      }
+    }, 'image/jpeg', 0.9);
   };
 
   /* ── Submission ──────────────────────────────────────────────── */
@@ -275,15 +331,20 @@ export default function RecordComplaint() {
 
         <div className="image-block">
           <h3>Image Evidence</h3>
-          <p className="image-hint">Choose one option. Both buttons are always visible.</p>
+          <p className="image-hint">Take a photo with your camera or upload from gallery.</p>
           <div className="image-actions">
             <button
               className="btn btn-secondary"
               type="button"
-              onClick={() => cameraInputRef.current?.click()}
+              onClick={startCamera}
+              disabled={cameraActive}
               id="btn-capture-photo"
             >
-              Capture Photo
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+                <circle cx="12" cy="13" r="3"/>
+              </svg>
+              {cameraActive ? 'Camera Open' : 'Capture Photo'}
             </button>
             <button
               className="btn btn-secondary"
@@ -291,17 +352,34 @@ export default function RecordComplaint() {
               onClick={() => galleryInputRef.current?.click()}
               id="btn-upload-gallery"
             >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+                <circle cx="9" cy="9" r="2"/>
+                <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+              </svg>
               Upload from Gallery
             </button>
           </div>
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/jpeg,image/jpg,image/png"
-            capture="environment"
-            onChange={handleImagePick}
-            className="hidden-file-input"
-          />
+
+          {/* Live Camera Preview */}
+          {cameraActive && (
+            <div className="camera-preview-card">
+              <video ref={videoRef} autoPlay playsInline muted className="camera-video" />
+              <canvas ref={canvasRef} style={{ display: 'none' }} />
+              <div className="camera-controls">
+                <button className="btn btn-primary" type="button" onClick={takeSnapshot}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                  </svg>
+                  Take Snapshot
+                </button>
+                <button className="btn btn-ghost" type="button" onClick={stopCamera}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           <input
             ref={galleryInputRef}
             type="file"
@@ -313,6 +391,9 @@ export default function RecordComplaint() {
             <div className="image-preview-card">
               <img src={imagePreviewUrl} alt="Evidence preview" className="evidence-preview" />
               <p className="image-file-name">{imageFile.name}</p>
+              <button className="btn btn-ghost btn-sm" type="button" onClick={() => { setImageFile(null); if (imagePreviewUrl) { URL.revokeObjectURL(imagePreviewUrl); setImagePreviewUrl(''); } }}>
+                Remove
+              </button>
             </div>
           )}
         </div>
