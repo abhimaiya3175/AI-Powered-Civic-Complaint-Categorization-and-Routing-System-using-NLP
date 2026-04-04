@@ -56,3 +56,6 @@ docker-compose.override.yml
 
 # ── Local Copilot Instructions ─────────────
 .github/instructions/location-authenticity.instructions.md
+
+# ── Datasets ─────────────────────────────
+Kannadadata/SPRINGLab___indic_tts_kannada

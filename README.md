@@ -161,17 +161,13 @@ Trust policy:
 ## 🧠 NLP Pipeline
 
 ```
-🎤 Voice Input (Kannada/Hindi/English)
+🎤 Voice Input (Native Kannada)
     ↓
-📝 Whisper STT (speech-to-text)
-    ↓
-🌐 Google Translate → English
+📝 Whisper STT (Directly decodes & translates to English)
     ↓
 🏷️ TF-IDF + Naive Bayes Classifier (98.5% accuracy)
     ↓
-📍 spaCy NER (GPE/LOC/FAC entity extraction)
-    ↓
-💾 PostgreSQL / SQLite storage
+💾 PostgreSQL / SQLite storage (with Live GPS)
 ```
 
 ---

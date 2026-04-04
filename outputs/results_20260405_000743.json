@@ -1,0 +1,50 @@
+[
+  {
+    "sample_id": 1,
+    "kannada_text": "ಸಮಕಾಲೀನ ಐತಿಹಾಸಿಕ ಸಾಹಸ ಮತ್ತು ಪೌರಾಣಿಕ ಸಚಿತ್ರ ಕಥೆಗಳು ಮತ್ತು ಕಾಮಿಕ್ಸ್ ಸಂಗ್ರಹ ಎಲ್ಲಾ ವಯಸ್ಸಿನ ಮಕ್ಕಳಿಗೆ ಒಂದು ಸಂವಾದಾತ್ಮಕ ತಾಣವಾಗಿದೆ",
+    "english_text": "I'm gonna be a little bit more patient. I'm gonna be a little bit more patient. I'm gonna be a little bit more patient.",
+    "detected_lang": "en",
+    "no_speech_prob": 0.6222,
+    "category": "Garbage / Sanitation",
+    "confidence": 0.0833,
+    "location": {
+      "raw_places": [],
+      "display": "Not detected",
+      "lat": null,
+      "lon": null
+    },
+    "error": null
+  },
+  {
+    "sample_id": 2,
+    "kannada_text": "ಮಕ್ಕಳು ಕೇವಲ ಭಾರತೀಯ ಸಂಸ್ಕೃತಿ ಮತ್ತು ಸಂಪ್ರದಾಯದ ಬಗ್ಗೆ ಜ್ಞಾನ ಪಡೆಯಲು ಆದರೆ ಪ್ರಸ್ತುತ ಘಟನೆಗಳ ಬಗ್ಗೆ ಮಾಹಿತಿ ಸುರಕ್ಷಿತ ಮೂಲವಾಗಿರಬಹುದು ಗುರಿಯನ್ನು ಹೊಂದಿದೆ",
+    "english_text": "You have a cat I do you think? You have a cat I do you think?",
+    "detected_lang": "en",
+    "no_speech_prob": 0.3616,
+    "category": "Garbage / Sanitation",
+    "confidence": 0.0833,
+    "location": {
+      "raw_places": [],
+      "display": "Not detected",
+      "lat": null,
+      "lon": null
+    },
+    "error": null
+  },
+  {
+    "sample_id": 3,
+    "kannada_text": "ತಮ್ಮ ಅನುಪಮ ಪಾಂಡಿತ್ಯಕ್ಕೂ, ಜ್ಞಾನಕ್ಕೂ ಕಾಣಿಕೇಯಾಗಿ ಗೌರವ ಪೂರ್ವಕವಾಗಿ ಸಮರ್ಪಿಸಿಕೊಳ್ಳುತ್ತೇನೆ",
+    "english_text": "I can become türre Serf Tef",
+    "detected_lang": "la",
+    "no_speech_prob": 0.4965,
+    "category": "Garbage / Sanitation",
+    "confidence": 0.0833,
+    "location": {
+      "raw_places": [],
+      "display": "Not detected",
+      "lat": null,
+      "lon": null
+    },
+    "error": null
+  }
+]
