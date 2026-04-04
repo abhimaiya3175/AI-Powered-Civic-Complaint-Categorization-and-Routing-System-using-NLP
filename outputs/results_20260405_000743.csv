@@ -1,0 +1,4 @@
+sample_id,kannada_text,english_text,detected_lang,no_speech_prob,category,confidence,location_raw_places,location_display,location_lat,location_lon,error
+1,ಸಮಕಾಲೀನ ಐತಿಹಾಸಿಕ ಸಾಹಸ ಮತ್ತು ಪೌರಾಣಿಕ ಸಚಿತ್ರ ಕಥೆಗಳು ಮತ್ತು ಕಾಮಿಕ್ಸ್ ಸಂಗ್ರಹ ಎಲ್ಲಾ ವಯಸ್ಸಿನ ಮಕ್ಕಳಿಗೆ ಒಂದು ಸಂವಾದಾತ್ಮಕ ತಾಣವಾಗಿದೆ,I'm gonna be a little bit more patient. I'm gonna be a little bit more patient. I'm gonna be a little bit more patient.,en,0.6222,Garbage / Sanitation,0.0833,[],Not detected,,,
+2,ಮಕ್ಕಳು ಕೇವಲ ಭಾರತೀಯ ಸಂಸ್ಕೃತಿ ಮತ್ತು ಸಂಪ್ರದಾಯದ ಬಗ್ಗೆ ಜ್ಞಾನ ಪಡೆಯಲು ಆದರೆ ಪ್ರಸ್ತುತ ಘಟನೆಗಳ ಬಗ್ಗೆ ಮಾಹಿತಿ ಸುರಕ್ಷಿತ ಮೂಲವಾಗಿರಬಹುದು ಗುರಿಯನ್ನು ಹೊಂದಿದೆ,You have a cat I do you think? You have a cat I do you think?,en,0.3616,Garbage / Sanitation,0.0833,[],Not detected,,,
+3,"ತಮ್ಮ ಅನುಪಮ ಪಾಂಡಿತ್ಯಕ್ಕೂ, ಜ್ಞಾನಕ್ಕೂ ಕಾಣಿಕೇಯಾಗಿ ಗೌರವ ಪೂರ್ವಕವಾಗಿ ಸಮರ್ಪಿಸಿಕೊಳ್ಳುತ್ತೇನೆ",I can become türre Serf Tef,la,0.4965,Garbage / Sanitation,0.0833,[],Not detected,,,

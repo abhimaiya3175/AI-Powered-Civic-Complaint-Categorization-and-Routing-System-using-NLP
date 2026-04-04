@@ -150,7 +150,7 @@ ensure_complaints_schema_upgrades()
 
 # ====================== ML / NLP LOAD ======================
 logger.info("Loading model_bbmp.pkl …")
-with open("model_bbmp.pkl", "rb") as f:
+with open("Models/model_bbmp.pkl", "rb") as f:
     model_package = pickle.load(f)
 vectorizer = model_package["vectorizer"]
 clf = model_package["classifier"]
@@ -438,7 +438,13 @@ async def submit_complaint(
     detected_language = "en"
     if audio_path:
         try:
-            result = whisper_model.transcribe(audio_path)
+            result = whisper_model.transcribe(
+                audio_path,
+                language="kn",
+                task="translate",
+                fp16=False,
+                condition_on_previous_text=False,
+            )
             audio_text = result["text"].strip()
             detected_language = result.get("language", "en")
             if not audio_text and not submitted_text:
@@ -466,25 +472,21 @@ async def submit_complaint(
 
     # 4. Translate to English using deep-translator
     try:
-        if detected_language != "en":
-            translated_text = GoogleTranslator(
-                source="auto", target="en"
-            ).translate(transcribed_text)
-            logger.info(f"Translated to English: {translated_text}")
-        else:
-            translated_text = transcribed_text
+        translated_text = GoogleTranslator(
+            source="auto", target="en"
+        ).translate(transcribed_text)
+        logger.info(f"Translated to English: {translated_text}")
     except Exception as e:
         logger.error(f"Translation failed: {e}")
         translated_text = transcribed_text
         logger.warning("Using original text as fallback due to translation failure.")
 
-    # 5 & 6. Classify complaint and anchor location to live coordinates
     try:
         category = clf.predict(vectorizer.transform([translated_text]))[0]
         location = f"{live_latitude:.6f}, {live_longitude:.6f}"
         logger.info(f"Category: {category} | Location: {location}")
     except Exception as e:
-        logger.error(f"Classification or NER failed: {e}")
+        logger.error(f"Classification failed: {e}")
         category = "Others"
         location = f"{live_latitude:.6f}, {live_longitude:.6f}"
 
