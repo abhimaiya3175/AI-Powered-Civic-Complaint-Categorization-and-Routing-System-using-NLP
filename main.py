@@ -20,6 +20,7 @@ from deep_translator import GoogleTranslator
 from jose import JWTError, jwt
 from dotenv import load_dotenv
 import math
+import bcrypt
 
 load_dotenv()
 
@@ -77,6 +78,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # ====================== DATABASE MODELS ======================
+class AdminUser(Base):
+    __tablename__ = "admin_users"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+
 class Complaint(Base):
     __tablename__ = "complaints"
     id = Column(Integer, primary_key=True, index=True)
@@ -101,6 +108,17 @@ class Complaint(Base):
 
 Base.metadata.create_all(bind=engine)
 
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception:
+        return False
+
+def get_password_hash(password: str) -> str:
+    pwd_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed_password.decode('utf-8')
 
 def ensure_complaints_schema_upgrades():
     """Add newly introduced columns for existing databases without migrations."""
@@ -169,12 +187,17 @@ def get_db():
     finally:
         db.close()
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
             raise HTTPException(status_code=401, detail="Invalid token")
+        
+        user = db.query(AdminUser).filter(AdminUser.username == username).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="User no longer exists. Please log in again.")
+            
         return username
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -306,18 +329,40 @@ def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float
 
 # ---------- Auth ----------
 @app.post("/login")
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """Authenticate admin user and return JWT token."""
-    admin_user = os.getenv("ADMIN_USERNAME", "admin")
-    admin_pass = os.getenv("ADMIN_PASSWORD", "bbmp2025")
+    user = db.query(AdminUser).filter(AdminUser.username == form_data.username).first()
 
-    if form_data.username != admin_user or form_data.password != admin_pass:
+    if not user or not verify_password(form_data.password, user.hashed_password):
         logger.warning("Failed login attempt for user '%s'", form_data.username)
         raise HTTPException(status_code=400, detail="Incorrect username or password")
 
-    access_token = jwt.encode({"sub": form_data.username}, SECRET_KEY, algorithm=ALGORITHM)
-    logger.info("User '%s' logged in successfully", form_data.username)
+    access_token = jwt.encode({"sub": user.username}, SECRET_KEY, algorithm=ALGORITHM)
+    logger.info("User '%s' logged in successfully", user.username)
     return {"access_token": access_token, "token_type": "bearer"}
+
+class AdminCreate(BaseModel):
+    username: str
+    password: str
+    setup_token: str
+
+@app.post("/register-admin")
+def register_admin(admin: AdminCreate, db: Session = Depends(get_db)):
+    """Register a new admin user. Requires setup_token for security."""
+    if admin.setup_token != SECRET_KEY:
+        raise HTTPException(status_code=403, detail="Invalid setup token")
+    
+    existing_user = db.query(AdminUser).filter(AdminUser.username == admin.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+        
+    hashed_pw = get_password_hash(admin.password)
+    new_admin = AdminUser(username=admin.username, hashed_password=hashed_pw)
+    db.add(new_admin)
+    db.commit()
+    db.refresh(new_admin)
+    logger.info("Registered new admin: '%s'", admin.username)
+    return {"msg": "Admin created successfully"}
 
 # ---------- Submit Complaint ----------
 @app.post("/submit-complaint")

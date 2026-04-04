@@ -20,10 +20,11 @@
 | 🎤 **Voice Capture** | Citizens record complaints in **Kannada**, **Hindi**, or **English** |
 | 📍 **Live Location Capture** | Complaint submission requires real-time GPS coordinates from the device |
 | 📷 **Image Authenticity** | Camera/gallery image evidence validated via EXIF GPS + timestamp checks |
-| 🤖 **AI Pipeline** | Whisper STT → Google Translate → TF-IDF + Naive Bayes classifier (98.5% acc.) → spaCy NER geo-tagging |
-| 🛡️ **Trust Tiers** | High trust (auto-verified) for valid image+location; medium trust (manual review) for text/audio+location |
-| 🗺️ **Interactive Map** | Leaflet + CartoDB Positron light tiles with color-coded complaint markers |
-| 🔐 **JWT Auth** | Secure admin login with token-based access control |
+| 📹 **Desktop Webcam** | Citizens can now capture photos directly from their desktop via `getUserMedia` |
+| 🤖 **AI Pipeline** | Whisper STT → Google Translate → TF-IDF + NB (98.5% acc.) → spaCy NER |
+| 🛡️ **Trust Tiers** | High trust (auto-verified) for valid photo+location; Medium trust for others |
+| 🗺️ **Interactive Map** | Leaflet map with **dynamic red markers** for pending complaints (removed on verify) |
+| 🔐 **JWT Auth** | Secure database-backed login with token-based access control |
 | ✅ **HITL Verification** | Admin verifies/edits AI-classified complaints before finalizing |
 | 🔊 **Audio Playback** | Officers listen to original voice recordings in the dashboard |
 | 📊 **Live Statistics** | Real-time stats with category and language breakdowns |

@@ -12,18 +12,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-/* Geocode a location string via Nominatim */
-async function geocodeLocation(loc) {
-  if (!loc || loc === 'Unknown' || loc === 'Others') return null;
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(loc + ', Bengaluru, India')}&format=json&limit=1`
-    );
-    const data = await res.json();
-    if (data?.length > 0) return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-  } catch { /* ignore */ }
-  return null;
-}
+ 
 
 export default function ComplaintList() {
   const [complaints, setComplaints] = useState([]);
@@ -43,7 +32,6 @@ export default function ComplaintList() {
   const [playingId, setPlayingId] = useState(null);
   const [audioSources, setAudioSources] = useState({});
   const [audioLoading, setAudioLoading] = useState({});
-  const [geoCache, setGeoCache] = useState({});
 
   /* ── Auth ─────────────────────────────────────────────────────── */
   const handleLogin = async (e) => {
@@ -98,21 +86,7 @@ export default function ComplaintList() {
     if (loggedIn) { fetchComplaints(); fetchStats(); }
   }, [loggedIn, page]);
 
-  /* ── Geocode complaints for map ──────────────────────────────── */
-  useEffect(() => {
-    async function geocodeMissing() {
-      const newCache = { ...geoCache };
-      let updated = false;
-      for (const c of complaints) {
-        if (c.location && c.location !== 'Unknown' && c.location !== 'Others' && !newCache[c.location]) {
-          const coords = await geocodeLocation(c.location);
-          if (coords) { newCache[c.location] = coords; updated = true; }
-        }
-      }
-      if (updated) setGeoCache(newCache);
-    }
-    if (complaints.length > 0) geocodeMissing();
-  }, [complaints]);
+ 
 
   /* ── HITL: Verify ────────────────────────────────────────────── */
   const handleVerify = async (id) => {
@@ -315,53 +289,47 @@ export default function ComplaintList() {
       )}
 
       {/* Map */}
-      {Object.keys(geoCache).length > 0 && (
-        <div className="map-card card">
-          <div className="map-header">
-            <h3>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
-                <line x1="9" x2="9" y1="3" y2="18"/>
-                <line x1="15" x2="15" y1="6" y2="21"/>
-              </svg>
-              Complaint Map
-            </h3>
-          </div>
-          <div className="map-container">
-            <MapContainer center={[12.9716, 77.5946]} zoom={11} style={{ height: '100%', width: '100%' }}>
-              <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-              />
-              {complaints.map((c) => {
-                const coords = geoCache[c.location];
-                if (!coords) return null;
-                return (
-                  <CircleMarker
-                    key={`marker-${c.id}`}
-                    center={coords}
-                    radius={8}
-                    pathOptions={{
-                      fillColor: getMarkerColor(c.status),
-                      fillOpacity: 0.8,
-                      color: '#FFFFFF',
-                      weight: 2,
-                    }}
-                  >
-                    <Popup>
-                      <div className="map-popup">
-                        <strong>{c.category}</strong>
-                        <span>{c.location}</span>
-                        <span className={getStatusBadge(c.status)}>{c.status}</span>
-                      </div>
-                    </Popup>
-                  </CircleMarker>
-                );
-              })}
-            </MapContainer>
-          </div>
+      <div className="map-card card">
+        <div className="map-header">
+          <h3>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
+              <line x1="9" x2="9" y1="3" y2="18"/>
+              <line x1="15" x2="15" y1="6" y2="21"/>
+            </svg>
+            Complaint Map
+          </h3>
         </div>
-      )}
+        <div className="map-container">
+          <MapContainer center={[12.9716, 77.5946]} zoom={11} style={{ height: '100%', width: '100%' }}>
+            <TileLayer
+              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            />
+            {complaints.filter(c => c.status !== 'Verified' && c.live_latitude && c.live_longitude).map((c) => (
+              <CircleMarker
+                key={`marker-${c.id}`}
+                center={[c.live_latitude, c.live_longitude]}
+                radius={8}
+                pathOptions={{
+                  fillColor: '#EF4444', 
+                  fillOpacity: 0.8,
+                  color: '#FFFFFF',
+                  weight: 2,
+                }}
+              >
+                <Popup>
+                  <div className="map-popup">
+                    <strong>{c.category}</strong>
+                    <span>{c.location}</span>
+                    <span className={getStatusBadge(c.status)}>{c.status}</span>
+                  </div>
+                </Popup>
+              </CircleMarker>
+            ))}
+          </MapContainer>
+        </div>
+      </div>
 
       {/* Filters */}
       <div className="filters-bar">

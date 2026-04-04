@@ -31,7 +31,12 @@ export const submitComplaint = async ({
   });
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
+    let err = {};
+    try {
+      err = await response.json();
+    } catch (e) {
+      err.detail = `Server Error: ${response.status} ${response.statusText}. Please ensure the backend is running.`;
+    }
     throw new Error(err.detail || 'Failed to submit complaint');
   }
 
