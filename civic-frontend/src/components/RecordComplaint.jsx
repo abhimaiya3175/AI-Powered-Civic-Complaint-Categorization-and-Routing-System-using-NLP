@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import piexif from 'piexifjs';
 import { submitComplaint } from '../services/api';
 import '../styles/RecordComplaint.css';
 import { useNavigate } from 'react-router-dom';
@@ -83,6 +84,57 @@ export default function RecordComplaint() {
     }
   };
 
+  const toExifDateTime = (date) => {
+    const d = date instanceof Date ? date : new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${year}:${month}:${day} ${hours}:${minutes}:${seconds}`;
+  };
+
+  const decimalToDmsRational = (coordinate) => {
+    const absolute = Math.abs(coordinate);
+    const degrees = Math.floor(absolute);
+    const minutesFloat = (absolute - degrees) * 60;
+    const minutes = Math.floor(minutesFloat);
+    const secondsFloat = (minutesFloat - minutes) * 60;
+    const seconds = Math.round(secondsFloat * 10000);
+
+    return [
+      [degrees, 1],
+      [minutes, 1],
+      [seconds, 10000],
+    ];
+  };
+
+  const injectGeotagIntoJpeg = (jpegDataUrl, latitude, longitude, capturedAt) => {
+    const exifTime = toExifDateTime(capturedAt);
+    const exifObj = {
+      '0th': {
+        [piexif.ImageIFD.DateTime]: exifTime,
+      },
+      Exif: {
+        [piexif.ExifIFD.DateTimeOriginal]: exifTime,
+        [piexif.ExifIFD.DateTimeDigitized]: exifTime,
+      },
+      GPS: {
+        [piexif.GPSIFD.GPSLatitudeRef]: latitude >= 0 ? 'N' : 'S',
+        [piexif.GPSIFD.GPSLatitude]: decimalToDmsRational(latitude),
+        [piexif.GPSIFD.GPSLongitudeRef]: longitude >= 0 ? 'E' : 'W',
+        [piexif.GPSIFD.GPSLongitude]: decimalToDmsRational(longitude),
+      },
+      Interop: {},
+      '1st': {},
+      thumbnail: null,
+    };
+
+    const exifBytes = piexif.dump(exifObj);
+    return piexif.insert(exifBytes, jpegDataUrl);
+  };
+
   const captureLiveLocation = () => {
     if (!navigator.geolocation) {
       setLocationStatus('Geolocation is not supported in this browser.');
@@ -155,20 +207,40 @@ export default function RecordComplaint() {
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
+    if (!liveLocation) {
+      alert('Capture live location first so the photo can include geotag metadata.');
+      return;
+    }
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0);
 
-    canvas.toBlob((blob) => {
-      if (blob) {
-        const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-        setImageFile(file);
-        setImagePreviewUrl(URL.createObjectURL(blob));
-        stopCamera();
-      }
-    }, 'image/jpeg', 0.9);
+    try {
+      const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      const geotaggedDataUrl = injectGeotagIntoJpeg(
+        jpegDataUrl,
+        liveLocation.latitude,
+        liveLocation.longitude,
+        liveLocation.timestamp
+      );
+
+      fetch(geotaggedDataUrl)
+        .then((response) => response.blob())
+        .then((blob) => {
+          const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' });
+          if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+          setImageFile(file);
+          setImagePreviewUrl(URL.createObjectURL(blob));
+          stopCamera();
+        })
+        .catch(() => {
+          alert('Failed to encode geotag metadata in photo. Please retake the photo.');
+        });
+    } catch {
+      alert('Could not attach geotag metadata to this photo. Please retry.');
+    }
   };
 
   /* ── Submission ──────────────────────────────────────────────── */
