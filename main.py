@@ -2,8 +2,10 @@ import os
 import uuid
 import logging
 import mimetypes
+import asyncio
+import sys
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -16,13 +18,49 @@ from PIL.ExifTags import GPSTAGS
 import spacy
 import pickle
 import whisper
-from deep_translator import GoogleTranslator
+import torch
 from jose import JWTError, jwt
 from dotenv import load_dotenv
+import re
 import math
 import bcrypt
+import speech_recognition as sr
+from pydub import AudioSegment
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+try:
+    from IndicTransToolkit import IndicProcessor  # type: ignore
+except Exception:
+    try:
+        # Some distributions expose IndicProcessor from a nested module.
+        from IndicTransToolkit.processor import IndicProcessor  # type: ignore
+    except Exception:
+        IndicProcessor = None
+
+
+class IndicProcessorFallback:
+    """Fallback processor when IndicTransToolkit cannot be imported on the host."""
+
+    def __init__(self, inference: bool = True):
+        self.inference = inference
+
+    def preprocess_batch(self, text_batch: list[str], src_lang: str, tgt_lang: str) -> list[str]:
+        # Basic language-tag prefix so IndicTrans2 still receives source/target hints.
+        return [f"{src_lang} {tgt_lang} {(text or '').strip()}".strip() for text in text_batch]
+
+    def postprocess_batch(self, text_batch: list[str], lang: str) -> list[str]:
+        return [(text or "").strip() for text in text_batch]
 
 load_dotenv()
+
+# Ensure multilingual logs do not crash on cp1252 terminals (common on Windows).
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 # ====================== LOGGING SETUP ======================
 logging.basicConfig(
@@ -31,7 +69,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("bbmp_complaints.log")
+        logging.FileHandler("bbmp_complaints.log", encoding="utf-8")
     ]
 )
 logger = logging.getLogger("bbmp")
@@ -39,6 +77,20 @@ logger = logging.getLogger("bbmp")
 # ====================== CONFIG ======================
 SECRET_KEY = os.getenv("SECRET_KEY", "replace-with-a-strong-secret")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+INDICTRANS2_MODEL_NAME = "ai4bharat/indictrans2-indic-en-dist-200M"
+NLLB_FALLBACK_MODEL_NAME = "facebook/nllb-200-distilled-600M"
+ROTARY_INDICTRANS2_FALLBACK_MODEL_NAME = "prajdabre/rotary-indictrans2-indic-en-dist-200M"
+
+SUPPORTED_LANGUAGES: Dict[str, str] = {
+    "kn": "Kannada",
+    "hi": "Hindi",
+    "en": "English",
+}
+INDIC_LANG_TAGS: Dict[str, str] = {
+    "kn": "kan_Knda",
+    "hi": "hin_Deva",
+    "en": "eng_Latn",
+}
 
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
@@ -60,10 +112,13 @@ ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png"}
 GPS_TOLERANCE_METERS = 100.0
 MAX_IMAGE_AGE_SECONDS = 10 * 60
 
+import urllib.parse
+encoded_password = urllib.parse.quote_plus(DB_PASSWORD)
+
 # Prefer explicit DATABASE_URL, otherwise construct from DB_* values.
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
+    f"postgresql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
 )
 try:
     engine = create_engine(DATABASE_URL)
@@ -164,7 +219,7 @@ except OSError:
 
 logger.info("Loading Whisper small …")
 whisper_model = whisper.load_model("small")
-logger.info("All models loaded successfully")
+logger.info("Core models loaded successfully")
 
 # ====================== FASTAPI APP ======================
 app = FastAPI(title="Multilingual Civic Complaint System (BBMP)")
@@ -178,6 +233,25 @@ app.add_middleware(
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+# ── Health Check (Railway / Docker readiness probe) ──────────────
+from fastapi.responses import JSONResponse
+
+@app.get("/health", tags=["ops"])
+async def health_check():
+    """Liveness + readiness probe used by Railway and Docker healthchecks."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(sql_text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    status = "ok" if db_ok else "degraded"
+    return JSONResponse(
+        content={"status": status, "db": "connected" if db_ok else "unreachable"},
+        status_code=200 if db_ok else 503,
+    )
+
 
 # ====================== DEPENDENCIES ======================
 def get_db():
@@ -256,6 +330,177 @@ def parse_client_timestamp(timestamp_value: str, field_name: str) -> datetime:
     return parsed
 
 
+def normalize_language_code(language_value: str, field_name: str) -> str:
+    normalized = (language_value or "").strip().lower()
+    if normalized not in SUPPORTED_LANGUAGES:
+        allowed = ", ".join(sorted(SUPPORTED_LANGUAGES.keys()))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {field_name} '{language_value}'. Allowed values: {allowed}",
+        )
+    return normalized
+
+
+def _translate_batch_sync(
+    text_batch: list[str],
+    src_lang_tag: str,
+    tgt_lang_tag: str,
+    tokenizer: AutoTokenizer,
+    model: AutoModelForSeq2SeqLM,
+    processor: Any,
+    translation_backend: str,
+) -> list[str]:
+    """Run one CPU translation batch with backend-specific preprocessing."""
+    # Official IndicTrans2 path with IndicProcessor preprocessing/postprocessing.
+    if translation_backend == "indictrans2":
+        model_inputs = processor.preprocess_batch(text_batch, src_lang=src_lang_tag, tgt_lang=tgt_lang_tag)
+
+        encoded_inputs = tokenizer(
+            model_inputs,
+            truncation=True,
+            padding="longest",
+            return_tensors="pt",
+            return_attention_mask=True,
+        )
+        encoded_inputs = {key: value.to("cpu") for key, value in encoded_inputs.items()}
+
+        with torch.no_grad():
+            generated_tokens = model.generate(
+                **encoded_inputs,
+                max_length=256,
+                num_beams=5,
+                do_sample=False,
+                use_cache=True,
+            )
+
+        decoded_batch = tokenizer.batch_decode(
+            generated_tokens,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True,
+        )
+        return processor.postprocess_batch(decoded_batch, lang=tgt_lang_tag)
+
+    # NLLB fallback path for robust Indic -> English translation when
+    # official IndicTrans2 checkpoints are inaccessible in the environment.
+    if translation_backend == "nllb":
+        try:
+            tokenizer.src_lang = src_lang_tag
+        except Exception:
+            pass
+
+        encoded_inputs = tokenizer(
+            text_batch,
+            truncation=True,
+            padding="longest",
+            return_tensors="pt",
+            return_attention_mask=True,
+        )
+        encoded_inputs = {key: value.to("cpu") for key, value in encoded_inputs.items()}
+
+        forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang_tag)
+
+        with torch.no_grad():
+            generated_tokens = model.generate(
+                **encoded_inputs,
+                forced_bos_token_id=forced_bos_token_id,
+                max_length=256,
+                num_beams=5,
+                do_sample=False,
+                use_cache=True,
+            )
+
+        decoded_batch = tokenizer.batch_decode(
+            generated_tokens,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True,
+        )
+        return [(text or "").strip() for text in decoded_batch]
+
+    # Fallback path for public rotary IndicTrans2 checkpoints that require
+    # language tags directly in-text and run more stably with cache disabled.
+    tagged_inputs = [f"{src_lang_tag} {tgt_lang_tag} {(text or '').strip()}".strip() for text in text_batch]
+
+    encoded_inputs = tokenizer(
+        tagged_inputs,
+        truncation=True,
+        padding="longest",
+        return_tensors="pt",
+        return_attention_mask=True,
+    )
+    encoded_inputs = {key: value.to("cpu") for key, value in encoded_inputs.items()}
+
+    with torch.no_grad():
+        generated_tokens = model.generate(
+            **encoded_inputs,
+            max_length=256,
+            num_beams=5,
+            do_sample=False,
+            use_cache=False,
+        )
+
+    decoded_batch = tokenizer.batch_decode(
+        generated_tokens,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=True,
+    )
+    return [(text or "").strip() for text in decoded_batch]
+
+
+async def translate_text_with_indictrans2(text: str, source_language: str, target_language: str) -> str:
+    """
+    Mandatory step 2: dedicated NLP translation after Whisper transcription.
+    Uses IndicTrans2 with IndicTransToolkit preprocessing/postprocessing.
+    """
+    clean_text = (text or "").strip()
+    if not clean_text or source_language == target_language:
+        return clean_text
+
+    # This CPU model is optimized for Indic->English translation.
+    # For unsupported target directions, keep original text as safe fallback.
+    if target_language != "en":
+        logger.warning("Requested translation to '%s' with Indic->English model. Returning original text.", target_language)
+        return clean_text
+
+    if source_language not in INDIC_LANG_TAGS or target_language not in INDIC_LANG_TAGS:
+        return clean_text
+
+    if source_language == "en":
+        return clean_text
+
+    tokenizer = getattr(app.state, "indictrans_tokenizer", None)
+    model = getattr(app.state, "indictrans_model", None)
+    processor = getattr(app.state, "indic_processor", None)
+    translation_backend = getattr(app.state, "translation_backend", "unknown")
+    translation_lock = getattr(app.state, "translation_lock", None)
+
+    if tokenizer is None or model is None or processor is None or translation_lock is None:
+        logger.warning("Translation assets are not available (backend=%s). Returning original text.", translation_backend)
+        return clean_text
+
+    src_lang_tag = INDIC_LANG_TAGS[source_language]
+    tgt_lang_tag = INDIC_LANG_TAGS[target_language]
+
+    try:
+        # Offload model.generate to a worker thread so FastAPI event loop stays responsive on CPU.
+        async with translation_lock:
+            translated_batch = await asyncio.to_thread(
+                _translate_batch_sync,
+                [clean_text],
+                src_lang_tag,
+                tgt_lang_tag,
+                tokenizer,
+                model,
+                processor,
+                translation_backend,
+            )
+
+        translated_text = (translated_batch[0] if translated_batch else "").strip()
+        return translated_text or clean_text
+    except Exception as exc:
+        logger.error("IndicTrans2 translation failed (%s->%s): %s", source_language, target_language, exc)
+        return clean_text
+
+
 def convert_dms_to_decimal(dms_value, ref) -> float:
     degrees = float(dms_value[0])
     minutes = float(dms_value[1])
@@ -325,6 +570,85 @@ def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return earth_radius * c
 
+
+@app.on_event("startup")
+async def preload_translation_models() -> None:
+    """Preload IndicTrans2 translation assets once at startup for CPU inference."""
+
+    def _load_indictrans2_assets(model_name: str) -> tuple[AutoTokenizer, AutoModelForSeq2SeqLM, Any]:
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            torch_dtype=torch.float32,
+        )
+        model.to("cpu")
+        model.eval()
+        processor_class = IndicProcessor if IndicProcessor is not None else IndicProcessorFallback
+        processor = processor_class(inference=True)
+        return tokenizer, model, processor
+
+    def _load_nllb_assets(model_name: str) -> tuple[AutoTokenizer, AutoModelForSeq2SeqLM, Any]:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name,
+            use_safetensors=False,
+            torch_dtype=torch.float32,
+        )
+        model.to("cpu")
+        model.eval()
+        return tokenizer, model, IndicProcessorFallback(inference=True)
+
+    app.state.indictrans_tokenizer = None
+    app.state.indictrans_model = None
+    app.state.indic_processor = None
+    app.state.translation_backend = "unavailable"
+    app.state.translation_lock = asyncio.Lock()
+
+    try:
+        logger.info("Loading IndicTrans2 distilled CPU model: %s", INDICTRANS2_MODEL_NAME)
+        tokenizer, model, processor = await asyncio.to_thread(_load_indictrans2_assets, INDICTRANS2_MODEL_NAME)
+        app.state.indictrans_tokenizer = tokenizer
+        app.state.indictrans_model = model
+        app.state.indic_processor = processor
+        app.state.translation_backend = "indictrans2"
+        if IndicProcessor is None:
+            logger.warning("IndicTransToolkit not installed; using fallback processor for IndicTrans2 preprocessing.")
+        logger.info("IndicTrans2 + IndicProcessor loaded successfully (backend=indictrans2).")
+        return
+    except Exception as primary_exc:
+        logger.error("Failed to preload primary IndicTrans2 assets (%s): %s", INDICTRANS2_MODEL_NAME, primary_exc)
+
+    try:
+        logger.info("Loading fallback translation model: %s", NLLB_FALLBACK_MODEL_NAME)
+        tokenizer, model, processor = await asyncio.to_thread(_load_nllb_assets, NLLB_FALLBACK_MODEL_NAME)
+        app.state.indictrans_tokenizer = tokenizer
+        app.state.indictrans_model = model
+        app.state.indic_processor = processor
+        app.state.translation_backend = "nllb"
+        logger.info("Fallback translation model loaded successfully (backend=nllb).")
+        return
+    except Exception as nllb_exc:
+        logger.error("Failed to preload fallback translation assets (%s): %s", NLLB_FALLBACK_MODEL_NAME, nllb_exc)
+
+    try:
+        logger.info("Loading tertiary fallback translation model: %s", ROTARY_INDICTRANS2_FALLBACK_MODEL_NAME)
+        tokenizer, model, processor = await asyncio.to_thread(
+            _load_indictrans2_assets,
+            ROTARY_INDICTRANS2_FALLBACK_MODEL_NAME,
+        )
+        app.state.indictrans_tokenizer = tokenizer
+        app.state.indictrans_model = model
+        app.state.indic_processor = processor
+        app.state.translation_backend = "rotary_indictrans2"
+        logger.info("Tertiary IndicTrans2-compatible model loaded successfully (backend=rotary_indictrans2).")
+    except Exception as rotary_exc:
+        logger.error(
+            "Failed to preload tertiary fallback translation assets (%s): %s",
+            ROTARY_INDICTRANS2_FALLBACK_MODEL_NAME,
+            rotary_exc,
+        )
+
 # ====================== ENDPOINTS ======================
 
 # ---------- Auth ----------
@@ -373,11 +697,13 @@ async def submit_complaint(
     live_longitude: float = Form(...),
     live_location_timestamp: str = Form(...),
     text_note: str = Form(default=""),
+    language: str = Form(default="en"),
+    target_language: str = Form(default="en"),
     db: Session = Depends(get_db),
 ):
     """
-    Full NLP pipeline: receive audio → transcribe → detect language →
-    translate → classify → extract location → save to DB.
+    Full NLP pipeline: receive audio → transcribe (Whisper) →
+    translate (dedicated NLP model) → classify → save to DB.
     """
     # 0. Validate live location fields (mandatory)
     if not (-90 <= live_latitude <= 90) or not (-180 <= live_longitude <= 180):
@@ -386,6 +712,9 @@ async def submit_complaint(
     live_location_at = parse_client_timestamp(live_location_timestamp, "live_location_timestamp")
 
     submitted_text = (text_note or "").strip()
+    recording_language = normalize_language_code(language, "language")
+    target_language_code = normalize_language_code(target_language, "target_language")
+
     if file is None and not submitted_text:
         raise HTTPException(status_code=400, detail="Provide either audio or complaint text along with live location.")
 
@@ -433,56 +762,128 @@ async def submit_complaint(
             f.write(await image.read())
         logger.info(f"Received image evidence: {image.filename}")
 
-    # 2 & 3. Derive complaint text from audio and/or text input
+    # 2. Whisper is used only for transcription in the selected recording language.
+    # 3. Translation is a separate NLP step (IndicTrans2 + IndicTransToolkit preprocessing).
     transcribed_text = submitted_text
-    detected_language = "en"
+    detected_language = recording_language
     if audio_path:
-        try:
-            result = whisper_model.transcribe(
-                audio_path,
-                language="kn",
-                task="translate",
-                fp16=False,
-                condition_on_previous_text=False,
-            )
-            audio_text = result["text"].strip()
-            detected_language = result.get("language", "en")
-            if not audio_text and not submitted_text:
-                logger.warning(f"No speech detected in uploaded audio: {audio_path}")
+        if recording_language in ["kn", "hi", "en"]:
+            logger.info("Using Google STT for highly accurate transcription.")
+            try:
+                lang_code_map = {"kn": "kn-IN", "hi": "hi-IN", "en": "en-IN"}
+                google_lang = lang_code_map.get(recording_language, "en-IN")
+                
+                # Convert webm to wav for SpeechRecognition
+                wav_path = audio_path + ".wav"
+                audio_segment = AudioSegment.from_file(audio_path)
+                audio_segment.export(wav_path, format="wav")
+                
+                recognizer = sr.Recognizer()
+                with sr.AudioFile(wav_path) as source:
+                    audio_data = recognizer.record(source)
+                
+                audio_text = await asyncio.to_thread(
+                    recognizer.recognize_google,
+                    audio_data,
+                    language=google_lang
+                )
+                
+                transcribed_text = f"{audio_text} {submitted_text}".strip() if submitted_text else audio_text
+                logger.info(f"Google STT Transcribed: {audio_text} | Language: {detected_language}")
+                
+                if os.path.exists(wav_path):
+                    os.remove(wav_path)
+                    
+            except sr.UnknownValueError:
+                logger.warning(f"Google STT could not understand audio for {audio_path}")
                 raise HTTPException(
                     status_code=400,
                     detail="No clear speech detected in audio. Please record again and speak closer to the microphone."
                 )
-            transcribed_text = f"{submitted_text} {audio_text}".strip() if submitted_text else audio_text
-            logger.info(f"Transcribed: {audio_text} | Language: {detected_language}")
-        except Exception as e:
-            if isinstance(e, HTTPException):
-                raise
-            logger.error(f"Whisper transcription failed for {audio_path}: {e}")
-            if "WinError 2" in str(e) or "ffmpeg" in str(e).lower():
-                logger.warning("FFmpeg not found. Cannot transcribe audio without FFmpeg.")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Audio transcription failed: FFmpeg is not installed or not found in PATH. Please install FFmpeg and retry."
+            except Exception as e:
+                logger.error(f"Google STT failed: {e}. Falling back to Whisper...")
+                # Fallback to Whisper
+                try:
+                    result = await asyncio.to_thread(
+                        whisper_model.transcribe,
+                        audio_path,
+                        task="transcribe",
+                        fp16=False,
+                        condition_on_previous_text=False,
+                    )
+                    audio_text = (result.get("text") or "").strip()
+                    whisper_detected_language = (result.get("language") or recording_language).strip().lower()
+                    if whisper_detected_language in SUPPORTED_LANGUAGES:
+                        detected_language = whisper_detected_language
+        
+                    if not audio_text and not submitted_text:
+                        logger.warning(f"No speech detected in uploaded audio: {audio_path}")
+                        raise HTTPException(
+                            status_code=400,
+                            detail="No clear speech detected in audio. Please record again and speak closer to the microphone."
+                        )
+                    transcribed_text = f"{audio_text} {submitted_text}".strip() if submitted_text else audio_text
+                    logger.info(f"Whisper Transcribed: {audio_text} | Language: {detected_language}")
+                except Exception as ex:
+                    raise HTTPException(status_code=500, detail="Audio transcription failed. Please try again.")
+        else:
+            try:
+                result = await asyncio.to_thread(
+                    whisper_model.transcribe,
+                    audio_path,
+                    task="transcribe",
+                    fp16=False,
+                    condition_on_previous_text=False,
                 )
-            raise HTTPException(status_code=500, detail="Audio transcription failed. Please try again.")
+                audio_text = (result.get("text") or "").strip()
+                whisper_detected_language = (result.get("language") or recording_language).strip().lower()
+                if whisper_detected_language in SUPPORTED_LANGUAGES:
+                    detected_language = whisper_detected_language
+    
+                if not audio_text and not submitted_text:
+                    logger.warning(f"No speech detected in uploaded audio: {audio_path}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No clear speech detected in audio. Please record again and speak closer to the microphone."
+                    )
+                transcribed_text = f"{audio_text} {submitted_text}".strip() if submitted_text else audio_text
+                logger.info(f"Transcribed: {audio_text} | Language: {detected_language}")
+            except Exception as e:
+                if isinstance(e, HTTPException):
+                    raise
+                logger.error(f"Whisper transcription failed for {audio_path}: {e}")
+                if "WinError 2" in str(e) or "ffmpeg" in str(e).lower():
+                    logger.warning("FFmpeg not found. Cannot transcribe audio without FFmpeg.")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Audio transcription failed: FFmpeg is not installed or not found in PATH. Please install FFmpeg and retry."
+                    )
+                raise HTTPException(status_code=500, detail="Audio transcription failed. Please try again.")
 
     if not transcribed_text:
         raise HTTPException(status_code=400, detail="Complaint text is required.")
 
-    # 4. Translate to English using deep-translator
-    try:
-        translated_text = GoogleTranslator(
-            source="auto", target="en"
-        ).translate(transcribed_text)
-        logger.info(f"Translated to English: {translated_text}")
-    except Exception as e:
-        logger.error(f"Translation failed: {e}")
-        translated_text = transcribed_text
-        logger.warning("Using original text as fallback due to translation failure.")
+    # Mandatory step: perform translation using dedicated NLP model (not Whisper translate task).
+    translated_text = await translate_text_with_indictrans2(
+        transcribed_text,
+        detected_language,
+        target_language_code,
+    )
+    logger.info("Translated text (%s->%s): %s", detected_language, target_language_code, translated_text)
+
+    english_text_for_classification = translated_text
+    if target_language_code != "en":
+        if detected_language == "en":
+            english_text_for_classification = transcribed_text
+        else:
+            english_text_for_classification = await translate_text_with_indictrans2(
+                transcribed_text,
+                detected_language,
+                "en",
+            ) or transcribed_text
 
     try:
-        category = clf.predict(vectorizer.transform([translated_text]))[0]
+        category = clf.predict(vectorizer.transform([english_text_for_classification]))[0]
         location = f"{live_latitude:.6f}, {live_longitude:.6f}"
         logger.info(f"Category: {category} | Location: {location}")
     except Exception as e:
@@ -556,10 +957,13 @@ async def submit_complaint(
         "location": complaint.location,
         "live_latitude": complaint.live_latitude,
         "live_longitude": complaint.live_longitude,
+        "transcribed_text": complaint.original_text,
         "trust_level": complaint.trust_level,
         "verification_mode": complaint.verification_mode,
         "image_live_distance_meters": complaint.image_live_distance_meters,
         "translated_text": complaint.translated_text,
+        "detected_language": complaint.language,
+        "target_language": target_language_code,
         "status": complaint.status,
     }
 
@@ -691,4 +1095,4 @@ def verify_complaint(
 # ====================== RUN ======================
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

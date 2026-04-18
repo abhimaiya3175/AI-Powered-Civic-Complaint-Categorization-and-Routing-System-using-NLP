@@ -22,28 +22,31 @@
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  font-family: var(--font-body);
+  font-family: var(--font-heading);
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--color-primary);
-  background: var(--color-primary-bg);
-  border: 1px solid rgba(29, 78, 216, 0.15);
+  background: rgba(0, 245, 255, 0.1);
+  border: 1px solid rgba(0, 245, 255, 0.3);
+  box-shadow: 0 0 15px rgba(0, 245, 255, 0.2);
   padding: 0.375rem 0.875rem;
   border-radius: var(--radius-full);
   margin-bottom: var(--space-lg);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  animation: float-1 4s ease-in-out infinite alternate;
 }
 
 .hero-title {
+  font-family: var(--font-heading);
   font-size: 2.75rem;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1.15;
-  letter-spacing: -0.035em;
+  letter-spacing: 0.05em;
   margin-bottom: var(--space-md);
-  background: linear-gradient(135deg, var(--color-text-heading) 0%, var(--color-primary) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--color-text-heading);
+  text-shadow: 0 0 15px rgba(255, 255, 255, 0.8);
+  text-transform: uppercase;
 }
 
 .hero-subtitle {
@@ -84,24 +87,13 @@
   padding: var(--space-2xl);
   text-align: center;
   background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(20px);
   position: relative;
   overflow: hidden;
-}
-
-.voice-capture-card::before {
-  content: '';
-  position: absolute;
-  top: -60%;
-  left: -20%;
-  width: 140%;
-  height: 120%;
-  background: radial-gradient(
-    ellipse at 50% 0%,
-    rgba(29, 78, 216, 0.04) 0%,
-    rgba(13, 148, 136, 0.02) 40%,
-    transparent 70%
-  );
-  pointer-events: none;
+  animation: gravity-rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards, float-2 7s ease-in-out infinite alternate;
 }
 
 .location-block,
@@ -112,9 +104,31 @@
   text-align: left;
   margin-bottom: var(--space-lg);
   padding: var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg);
+  border: 1px solid rgba(2, 132, 199, 0.15);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.location-block::before,
+.location-block::after,
+.image-block::before,
+.image-block::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-primary);
+  opacity: 0.6;
+}
+
+.location-block::before,
+.image-block::before {
+  top: -1px; left: -1px;
+  border-right: none; border-bottom: none;
+}
+.location-block::after,
+.image-block::after {
+  bottom: -1px; right: -1px;
+  border-left: none; border-top: none;
 }
 
 .location-header {
@@ -220,11 +234,20 @@
   background: #fff;
 }
 
+.text-note-block .result-label {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.text-note-block .input + .result-label {
+  margin-top: 0.875rem;
+}
+
 .submit-only-actions {
   margin-top: var(--space-sm);
 }
 
-/* ── Mic Button ────────────────────────────────────────────────── */
+/* ── Mic Button (Orb) ──────────────────────────────────────────── */
 .mic-area {
   position: relative;
   display: flex;
@@ -234,30 +257,30 @@
 }
 
 .mic-button {
-  width: 88px;
-  height: 88px;
+  width: 100px;
+  height: 100px;
   border-radius: 50%;
   border: none;
-  background: linear-gradient(135deg, var(--color-primary) 0%, #2563EB 100%);
+  background: radial-gradient(circle at center, #38BDF8 0%, #0284C7 60%, #0369A1 100%);
   color: #FFFFFF;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: transform var(--transition-base), box-shadow var(--transition-base);
-  animation: breathe 2.5s ease-in-out infinite;
-  box-shadow: 0 4px 20px rgba(29, 78, 216, 0.3);
+  animation: breathe 3s ease-in-out infinite, float-3 4s ease-in-out infinite alternate;
+  box-shadow: 0 0 30px rgba(56, 189, 248, 0.4), inset 0 0 15px #FFFFFF;
   position: relative;
   z-index: 1;
 }
 
 .mic-button:hover {
-  transform: scale(1.06);
-  box-shadow: 0 6px 28px rgba(29, 78, 216, 0.4);
+  transform: scale(1.1);
+  box-shadow: 0 0 50px rgba(56, 189, 248, 0.6), inset 0 0 20px #FFFFFF;
 }
 
 .mic-button:active {
-  transform: scale(0.97);
+  transform: scale(0.9);
 }
 
 .mic-label {
@@ -285,7 +308,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
   height: 64px;
   padding: 0 var(--space-md);
 }
@@ -293,8 +316,9 @@
 .waveform-bar {
   width: 4px;
   height: 100%;
-  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-light));
+  background: var(--color-primary);
   border-radius: 2px;
+  box-shadow: 0 0 10px var(--color-primary);
   animation: waveform-bar 0.8s ease-in-out infinite;
   transform-origin: center;
 }
@@ -402,12 +426,14 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-md);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(2, 132, 199, 0.2);
   border-radius: var(--radius-lg);
   padding: var(--space-lg);
   text-align: left;
   margin-bottom: var(--space-lg);
+  box-shadow: 0 0 20px rgba(2, 132, 199, 0.05);
+  position: relative;
 }
 
 .result-item {
@@ -417,17 +443,20 @@
 }
 
 .result-label {
+  font-family: var(--font-heading);
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--color-text-light);
+  color: var(--color-primary);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.1em;
 }
 
 .result-value {
+  font-family: var(--font-heading);
   font-size: 0.9375rem;
   font-weight: 500;
   color: var(--color-text-heading);
+  text-shadow: none;
 }
 
 .result-transcript {

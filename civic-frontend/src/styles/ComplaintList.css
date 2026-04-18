@@ -15,6 +15,12 @@
   width: 100%;
   max-width: 400px;
   padding: var(--space-2xl);
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(2, 132, 199, 0.15);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05), inset 0 0 20px rgba(255, 255, 255, 0.4);
+  animation: gravity-rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards, float-1 6s ease-in-out infinite alternate;
 }
 
 .login-header {
@@ -145,17 +151,20 @@
 }
 
 .stat-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(2, 132, 199, 0.1);
   border-radius: var(--radius-lg);
   padding: var(--space-lg);
   text-align: center;
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  transition: all var(--transition-base);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-5px);
+  box-shadow: 0 10px 25px rgba(2, 132, 199, 0.15);
+  border-color: rgba(2, 132, 199, 0.2);
 }
 
 .stat-icon {
@@ -185,11 +194,12 @@
 
 .stat-value {
   display: block;
-  font-family: var(--font-heading);
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--color-text-heading);
+  font-family: 'Orbitron', var(--font-heading);
+  font-size: 2rem;
+  font-weight: 800;
+  color: #0284C7;
   line-height: 1.2;
+  text-shadow: none;
 }
 
 .stat-label {
@@ -310,11 +320,27 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(2, 132, 199, 0.1);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-base);
 }
 
 .complaint-card:hover {
-  box-shadow: var(--shadow-lg);
-  transform: translateY(-1px);
+  transform: translateY(-5px) scale(1.01);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 0 15px rgba(2, 132, 199, 0.05);
+  border-color: rgba(2, 132, 199, 0.2);
+}
+
+.complaint-card.pending-glow {
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
+.complaint-card.verified-glow {
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.2);
 }
 
 .ccard-header {

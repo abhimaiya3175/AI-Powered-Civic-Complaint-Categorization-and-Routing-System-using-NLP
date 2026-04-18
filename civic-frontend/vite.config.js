@@ -3,11 +3,15 @@ import react from '@vitejs/plugin-react'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), basicSsl()],
+export default defineConfig(({ mode }) => ({
+  plugins: [
+    react(),
+    // HTTPS only in local dev — Vercel/Railway handle TLS in production
+    ...(mode === 'development' ? [basicSsl()] : []),
+  ],
   server: {
     host: true,
-    https: true,
+    https: mode === 'development',
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',
@@ -16,4 +20,5 @@ export default defineConfig({
       },
     },
   },
-})
+}))
+

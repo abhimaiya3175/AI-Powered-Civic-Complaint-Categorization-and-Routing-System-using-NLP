@@ -10,6 +10,8 @@ export const submitComplaint = async ({
   liveLongitude,
   liveLocationTimestamp,
   textNote,
+  language,
+  targetLanguage,
 }) => {
   const formData = new FormData();
   if (audioFile) {
@@ -24,6 +26,8 @@ export const submitComplaint = async ({
   formData.append('live_latitude', String(liveLatitude));
   formData.append('live_longitude', String(liveLongitude));
   formData.append('live_location_timestamp', liveLocationTimestamp);
+  formData.append('language', language || 'en');
+  formData.append('target_language', targetLanguage || 'en');
 
   const response = await fetch(`${API_BASE}/submit-complaint`, {
     method: 'POST',

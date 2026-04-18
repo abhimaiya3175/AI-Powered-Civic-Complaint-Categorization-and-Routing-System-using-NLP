@@ -150,7 +150,7 @@ export default function ComplaintList() {
   /* ── Login Screen ────────────────────────────────────────────── */
   if (!loggedIn) {
     return (
-      <div className="login-wrapper">
+      <div className="login-wrapper gravless-container">
         <div className="login-card card">
           <div className="login-header">
             <div className="login-icon">
@@ -220,7 +220,7 @@ export default function ComplaintList() {
 
   /* ── Dashboard ───────────────────────────────────────────────── */
   return (
-    <div className="dashboard" id="admin-dashboard">
+    <div className="dashboard gravless-container" id="admin-dashboard">
       {/* Header */}
       <div className="dashboard-header">
         <div>
@@ -301,10 +301,10 @@ export default function ComplaintList() {
           </h3>
         </div>
         <div className="map-container">
-          <MapContainer center={[12.9716, 77.5946]} zoom={11} style={{ height: '100%', width: '100%' }}>
+          <MapContainer center={[12.9716, 77.5946]} zoom={11} className="map-container">
             <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             />
             {complaints.filter(c => c.status !== 'Verified' && c.live_latitude && c.live_longitude).map((c) => (
               <CircleMarker
@@ -360,7 +360,7 @@ export default function ComplaintList() {
       ) : (
         <div className="complaints-grid">
           {filtered.map((c) => (
-            <div key={c.id} className="complaint-card card" id={`complaint-${c.id}`}>
+            <div key={c.id} className={`complaint-card card ${c.status === 'Verified' ? 'verified-glow' : 'pending-glow'}`} id={`complaint-${c.id}`}>
               {/* Card Header */}
               <div className="ccard-header">
                 <span className="ccard-id mono">#{c.id}</span>

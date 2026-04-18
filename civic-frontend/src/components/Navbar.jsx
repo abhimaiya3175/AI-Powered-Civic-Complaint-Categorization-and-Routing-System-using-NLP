@@ -8,16 +8,14 @@ export default function Navbar() {
         {/* Brand */}
         <NavLink to="/" className="navbar-brand">
           <div className="brand-icon" aria-hidden="true">
-            <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-              <rect width="32" height="32" rx="8" fill="#1D4ED8"/>
-              <path d="M8 22V12l8-5 8 5v10H8z" fill="#fff" opacity="0.9"/>
-              <rect x="13" y="17" width="6" height="5" rx="1" fill="#1D4ED8"/>
-              <circle cx="16" cy="13" r="2" fill="#1D4ED8"/>
-            </svg>
+            <div className="levitation-ring">
+              <div className="ring-dot"></div>
+              <div className="ring-base"></div>
+            </div>
           </div>
           <div className="brand-text">
-            <span className="brand-title">BBMP</span>
-            <span className="brand-subtitle">Civic Complaints</span>
+            <span className="brand-title">GravLess</span>
+            <span className="brand-subtitle">Civic Portal</span>
           </div>
         </NavLink>
 

@@ -4,6 +4,23 @@ import { submitComplaint } from '../services/api';
 import '../styles/RecordComplaint.css';
 import { useNavigate } from 'react-router-dom';
 
+const LANGUAGE_OPTIONS = [
+  { value: 'kn', label: 'ಕನ್ನಡ' },
+  { value: 'hi', label: 'हिंदी' },
+  { value: 'en', label: 'English' },
+];
+
+const TARGET_LANGUAGE_OPTIONS = [
+  { value: 'en', label: 'English' },
+  { value: 'kn', label: 'ಕನ್ನಡ' },
+  { value: 'hi', label: 'हिंदी' },
+];
+
+const getLanguageLabel = (languageCode) => {
+  const option = LANGUAGE_OPTIONS.find((item) => item.value === languageCode);
+  return option?.label || (languageCode || 'Unknown');
+};
+
 export default function RecordComplaint() {
   const [recording, setRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
@@ -16,6 +33,8 @@ export default function RecordComplaint() {
   const [result, setResult] = useState(null);
   const [duration, setDuration] = useState(0);
   const [cameraActive, setCameraActive] = useState(false);
+  const [recordingLanguage, setRecordingLanguage] = useState('kn');
+  const [targetLanguage, setTargetLanguage] = useState('en');
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -344,6 +363,8 @@ export default function RecordComplaint() {
         liveLongitude: locationForSubmission.longitude,
         liveLocationTimestamp: locationForSubmission.timestamp,
         textNote,
+        language: recordingLanguage,
+        targetLanguage,
       });
 
       setResult(response);
@@ -375,7 +396,7 @@ export default function RecordComplaint() {
   /* ── Success View ────────────────────────────────────────────── */
   if (result) {
     return (
-      <div className="hero-section">
+      <div className="page record-complaint-page gravless-container">
         <div className="success-card card">
           <div className="success-icon-container">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -411,11 +432,26 @@ export default function RecordComplaint() {
               <span className="result-label">Verification</span>
               <span className="result-value">{result.verification_mode || 'manual_review'}</span>
             </div>
+            <div className="result-item">
+              <span className="result-label">Detected Language</span>
+              <span className="result-value">{getLanguageLabel(result.detected_language)}</span>
+            </div>
+            <div className="result-item">
+              <span className="result-label">Translated To</span>
+              <span className="result-value">{getLanguageLabel(result.target_language)}</span>
+            </div>
           </div>
+
+          {result.transcribed_text && (
+            <div className="result-transcript">
+              <span className="result-label">Original Transcribed Text</span>
+              <p className="transcript-text">{result.transcribed_text}</p>
+            </div>
+          )}
 
           {result.translated_text && (
             <div className="result-transcript">
-              <span className="result-label">Transcript</span>
+              <span className="result-label">Translated Text</span>
               <p className="transcript-text">{result.translated_text}</p>
             </div>
           )}
@@ -431,7 +467,7 @@ export default function RecordComplaint() {
 
   /* ── Main View — Hero + Voice Capture ────────────────────────── */
   return (
-    <div className="hero-section">
+    <div className="hero-section gravless-container">
       {/* Hero Content */}
       <div className="hero-content">
         <div className="hero-badge">
@@ -542,6 +578,32 @@ export default function RecordComplaint() {
               </button>
             </div>
           )}
+        </div>
+
+        <div className="text-note-block">
+          <label htmlFor="recording-language" className="result-label">Recording Language</label>
+          <select
+            id="recording-language"
+            className="input"
+            value={recordingLanguage}
+            onChange={(e) => setRecordingLanguage(e.target.value)}
+          >
+            {LANGUAGE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+
+          <label htmlFor="target-language" className="result-label">Target Translation Language</label>
+          <select
+            id="target-language"
+            className="input"
+            value={targetLanguage}
+            onChange={(e) => setTargetLanguage(e.target.value)}
+          >
+            {TARGET_LANGUAGE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
         </div>
 
         <div className="text-note-block">
