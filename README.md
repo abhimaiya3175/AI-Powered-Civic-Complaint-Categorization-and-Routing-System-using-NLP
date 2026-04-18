@@ -21,7 +21,7 @@
 | 📍 **Live Location Capture** | Complaint submission requires real-time GPS coordinates from the device |
 | 📷 **Image Authenticity** | Camera/gallery image evidence validated via EXIF GPS + timestamp checks |
 | 📹 **Desktop Webcam** | Citizens can now capture photos directly from their desktop via `getUserMedia` |
-| 🤖 **AI Pipeline** | Whisper STT → Google Translate → TF-IDF + NB (98.5% acc.) → spaCy NER |
+| 🤖 **AI Pipeline** | Whisper STT (transcribe) → IndicTrans2/NLLB translation → TF-IDF + NB (98.5% acc.) → spaCy NER |
 | 🛡️ **Trust Tiers** | High trust (auto-verified) for valid photo+location; Medium trust for others |
 | 🗺️ **Interactive Map** | Leaflet map with **dynamic red markers** for pending complaints (removed on verify) |
 | 🔐 **JWT Auth** | Secure database-backed login with token-based access control |
@@ -114,6 +114,9 @@ copy .env.example .env       # Windows
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 
+# If you add or upgrade Python packages, refresh the lock file before commit
+pip freeze > requirements.txt
+
 # Start the backend
 python main.py
 ```
@@ -155,7 +158,19 @@ docker-compose up -d db
 - Keep API keys, JWT secrets, and DB passwords only in local `.env` files.
 - Never commit `.env`, `.env.*`, private keys, or credential JSON files.
 - Use `.env.example` and `civic-frontend/.env.example` as templates with placeholder values.
+- `.gitignore` blocks common private/runtime artifacts (`uploads/`, local DB files, logs, model/output folders, and virtual envs).
 - If a secret is accidentally committed, rotate it immediately and remove it from git history before sharing.
+
+### Safe Push Checklist
+
+Run this before every `git push`:
+
+```bash
+git status --short
+git ls-files .env .env.* "civic-frontend/.env*" complaints.db bbmp_complaints.log uploads/*
+```
+
+Expected result: only template files such as `.env.example` should appear.
 
 ---
 
@@ -181,7 +196,9 @@ Trust policy:
 ```
 🎤 Voice Input (Native Kannada)
     ↓
-📝 Whisper STT (Directly decodes & translates to English)
+📝 Whisper STT (Transcription in source language)
+    ↓
+🌐 IndicTrans2/NLLB (Dedicated translation step)
     ↓
 🏷️ TF-IDF + Naive Bayes Classifier (98.5% accuracy)
     ↓
