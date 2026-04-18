@@ -146,7 +146,7 @@ docker-compose up -d db
 
 | Role | Username | Password |
 |------|----------|----------|
-| Admin | `admin` | `change-me-admin-password` |
+| Admin | `ADMIN_USERNAME` (default: `admin`) | `ADMIN_PASSWORD` from `.env` |
 
 ---
 

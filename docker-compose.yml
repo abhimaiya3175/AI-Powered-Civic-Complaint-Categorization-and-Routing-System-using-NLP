@@ -4,9 +4,9 @@ services:
   db:
     image: postgres:15
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: change-me
-      POSTGRES_DB: bbmp_complaints
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
+      POSTGRES_DB: ${DB_NAME:-bbmp_complaints}
     ports:
       - "5432:5432"
     volumes:
@@ -22,15 +22,15 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DB_USER=postgres
-      - DB_PASSWORD=change-me
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=bbmp_complaints
-      - SECRET_KEY=replace-with-a-strong-secret
-      - JWT_ALGORITHM=HS256
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=change-me-admin-password
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-change-me}
+      - DB_HOST=${DB_HOST:-db}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-bbmp_complaints}
+      - SECRET_KEY=${SECRET_KEY:-replace-with-a-strong-secret}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-change-me-admin-password}
     depends_on:
       db:
         condition: service_healthy
