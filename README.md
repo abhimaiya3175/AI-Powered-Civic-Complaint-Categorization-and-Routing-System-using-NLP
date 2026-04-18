@@ -40,7 +40,8 @@ Civic Complaint/
 ├── requirements.txt         # Python dependencies
 ├── Dockerfile               # Backend container image
 ├── docker-compose.yml       # PostgreSQL + backend orchestration
-├── .env                     # Environment variables (secrets)
+├── .env.example             # Safe env template committed to git
+├── .env                     # Local secrets (ignored; never commit)
 │
 ├── scripts/
 │   ├── train_bbmp_model.py  # Model training script (BBMP dataset)
@@ -103,6 +104,12 @@ python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # macOS/Linux
 
+# Create local environment file (contains secrets; do not commit)
+copy .env.example .env       # Windows
+# cp .env.example .env       # macOS/Linux
+
+# Edit .env and set strong SECRET_KEY / DB credentials
+
 # Install dependencies
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
@@ -118,6 +125,8 @@ python main.py
 ```bash
 cd civic-frontend
 npm install
+copy .env.example .env       # Windows
+# cp .env.example .env       # macOS/Linux
 npm run dev
 ```
 
@@ -138,6 +147,15 @@ docker-compose up -d db
 | Role | Username | Password |
 |------|----------|----------|
 | Admin | `admin` | `change-me-admin-password` |
+
+---
+
+## 🔒 Security and Secret Management
+
+- Keep API keys, JWT secrets, and DB passwords only in local `.env` files.
+- Never commit `.env`, `.env.*`, private keys, or credential JSON files.
+- Use `.env.example` and `civic-frontend/.env.example` as templates with placeholder values.
+- If a secret is accidentally committed, rotate it immediately and remove it from git history before sharing.
 
 ---
 
