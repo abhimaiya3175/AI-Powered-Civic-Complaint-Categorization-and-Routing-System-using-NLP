@@ -10,7 +10,7 @@ export default function RecordComplaint() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [liveLocation, setLiveLocation] = useState(null);
-  const [locationStatus, setLocationStatus] = useState('Live location required before submission.');
+  const [locationStatus, setLocationStatus] = useState('GPS location will be captured automatically.');
   const [textNote, setTextNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
@@ -135,31 +135,83 @@ export default function RecordComplaint() {
     return piexif.insert(exifBytes, jpegDataUrl);
   };
 
-  const captureLiveLocation = () => {
-    if (!navigator.geolocation) {
-      setLocationStatus('Geolocation is not supported in this browser.');
-      return;
+  const getCurrentLocation = () =>
+    new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Geolocation is not supported in this browser.'));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            timestamp: new Date().toISOString(),
+          });
+        },
+        (error) => {
+          reject(new Error(error.message || 'Unable to capture location.'));
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    });
+
+  const ensureLiveLocation = async ({ forceFresh = false } = {}) => {
+    if (!forceFresh && liveLocation) {
+      return liveLocation;
     }
 
     setLocationStatus('Capturing live location...');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const nextLocation = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          timestamp: new Date().toISOString(),
-        };
-        setLiveLocation(nextLocation);
-        setLocationStatus(
-          `Live location captured: ${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`
-        );
-      },
-      (error) => {
-        setLiveLocation(null);
-        setLocationStatus(`Location access failed: ${error.message}`);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    const nextLocation = await getCurrentLocation();
+    setLiveLocation(nextLocation);
+    setLocationStatus(
+      `Live location captured: ${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`
     );
+    return nextLocation;
+  };
+
+  const drawPhotoStamp = (ctx, width, height, latitude, longitude, capturedAt) => {
+    const capturedDate = new Date(capturedAt);
+    const datePart = `${capturedDate.getFullYear()}-${String(capturedDate.getMonth() + 1).padStart(2, '0')}-${String(capturedDate.getDate()).padStart(2, '0')}`;
+    const timePart = `${String(capturedDate.getHours()).padStart(2, '0')}:${String(capturedDate.getMinutes()).padStart(2, '0')}:${String(capturedDate.getSeconds()).padStart(2, '0')}`;
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local';
+
+    const stampLines = [
+      `Lat: ${latitude.toFixed(6)}`,
+      `Lng: ${longitude.toFixed(6)}`,
+      `Date: ${datePart}`,
+      `Time: ${timePart} (${timeZone})`,
+    ];
+
+    const fontSize = Math.max(18, Math.round(width * 0.022));
+    const lineHeight = Math.round(fontSize * 1.35);
+    const horizontalPadding = Math.round(fontSize * 0.7);
+    const verticalPadding = Math.round(fontSize * 0.55);
+
+    ctx.font = `600 ${fontSize}px Arial`;
+    const maxTextWidth = Math.max(...stampLines.map((line) => ctx.measureText(line).width));
+
+    const boxWidth = Math.ceil(maxTextWidth + horizontalPadding * 2);
+    const boxHeight = Math.ceil(stampLines.length * lineHeight + verticalPadding * 2);
+    const boxX = Math.max(12, width - boxWidth - 14);
+    const boxY = Math.max(12, height - boxHeight - 14);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
+    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+
+    ctx.fillStyle = '#ffffff';
+    stampLines.forEach((line, index) => {
+      const textY = boxY + verticalPadding + lineHeight * (index + 0.82);
+      ctx.fillText(line, boxX + horizontalPadding, textY);
+    });
+  };
+
+  const captureLiveLocation = () => {
+    ensureLiveLocation({ forceFresh: true }).catch((error) => {
+      setLiveLocation(null);
+      setLocationStatus(`Location access failed: ${error.message}`);
+    });
   };
 
   const handleImagePick = (event) => {
@@ -177,6 +229,10 @@ export default function RecordComplaint() {
   /* ── Camera Capture (Desktop Webcam) ───────────────────────── */
   const startCamera = async () => {
     try {
+      ensureLiveLocation({ forceFresh: true }).catch((error) => {
+        setLocationStatus(`Location access failed: ${error.message}`);
+      });
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
       });
@@ -202,28 +258,40 @@ export default function RecordComplaint() {
     setCameraActive(false);
   };
 
-  const takeSnapshot = () => {
+  const takeSnapshot = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
-    if (!liveLocation) {
-      alert('Capture live location first so the photo can include geotag metadata.');
+    let locationForPhoto = liveLocation;
+    try {
+      locationForPhoto = await ensureLiveLocation({ forceFresh: true });
+    } catch (error) {
+      alert(`Unable to capture GPS location automatically: ${error.message}`);
       return;
     }
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
+    const capturedAt = new Date().toISOString();
     ctx.drawImage(video, 0, 0);
+    drawPhotoStamp(
+      ctx,
+      canvas.width,
+      canvas.height,
+      locationForPhoto.latitude,
+      locationForPhoto.longitude,
+      capturedAt
+    );
 
     try {
       const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.9);
       const geotaggedDataUrl = injectGeotagIntoJpeg(
         jpegDataUrl,
-        liveLocation.latitude,
-        liveLocation.longitude,
-        liveLocation.timestamp
+        locationForPhoto.latitude,
+        locationForPhoto.longitude,
+        capturedAt
       );
 
       fetch(geotaggedDataUrl)
@@ -248,13 +316,19 @@ export default function RecordComplaint() {
     const hasAudio = Boolean(audioBlob);
     const hasText = Boolean(textNote.trim());
 
-    if (!liveLocation) {
-      alert('Live location is required. Please tap Capture Live Location first.');
-      return;
-    }
     if (!hasAudio && !hasText) {
       alert('Please provide either voice audio or complaint text.');
       return;
+    }
+
+    let locationForSubmission = liveLocation;
+    if (!locationForSubmission) {
+      try {
+        locationForSubmission = await ensureLiveLocation({ forceFresh: true });
+      } catch (error) {
+        alert(`Unable to capture GPS location automatically: ${error.message}`);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -266,9 +340,9 @@ export default function RecordComplaint() {
       const response = await submitComplaint({
         audioFile,
         imageFile,
-        liveLatitude: liveLocation.latitude,
-        liveLongitude: liveLocation.longitude,
-        liveLocationTimestamp: liveLocation.timestamp,
+        liveLatitude: locationForSubmission.latitude,
+        liveLongitude: locationForSubmission.longitude,
+        liveLocationTimestamp: locationForSubmission.timestamp,
         textNote,
       });
 
@@ -388,7 +462,7 @@ export default function RecordComplaint() {
           <div className="location-header">
             <h3>Live Location</h3>
             <button className="btn btn-secondary" type="button" onClick={captureLiveLocation}>
-              Capture Live Location
+              Refresh GPS Location
             </button>
           </div>
           <p className="location-status">{locationStatus}</p>
@@ -403,7 +477,7 @@ export default function RecordComplaint() {
 
         <div className="image-block">
           <h3>Image Evidence</h3>
-          <p className="image-hint">Take a photo with your camera or upload from gallery.</p>
+          <p className="image-hint">Camera photos are stamped with location and capture time. You can also upload from gallery.</p>
           <div className="image-actions">
             <button
               className="btn btn-secondary"
