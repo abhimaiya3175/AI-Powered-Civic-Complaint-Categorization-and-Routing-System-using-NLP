@@ -396,7 +396,7 @@ export default function RecordComplaint() {
   /* ── Success View ────────────────────────────────────────────── */
   if (result) {
     return (
-      <div className="page record-complaint-page gravless-container">
+      <div className="record-complaint-page gravless-container">
         <div className="success-card card">
           <div className="success-icon-container">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

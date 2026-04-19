@@ -35,13 +35,23 @@ export const submitComplaint = async ({
   });
 
   if (!response.ok) {
-    let err = {};
-    try {
-      err = await response.json();
-    } catch (e) {
-      err.detail = `Server Error: ${response.status} ${response.statusText}. Please ensure the backend is running.`;
+    let detail = '';
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+    if (contentType.includes('application/json')) {
+      const err = await response.json().catch(() => ({}));
+      detail = err.detail || '';
+    } else {
+      detail = (await response.text().catch(() => '')).trim();
     }
-    throw new Error(err.detail || 'Failed to submit complaint');
+
+    if (!detail) {
+      detail = response.status >= 500
+        ? `Server error (${response.status}). Please try again.`
+        : `Request failed (${response.status}).`;
+    }
+
+    throw new Error(detail);
   }
 
   return response.json();

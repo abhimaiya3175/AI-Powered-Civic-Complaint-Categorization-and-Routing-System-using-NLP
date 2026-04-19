@@ -502,9 +502,23 @@ async def translate_text_with_indictrans2(text: str, source_language: str, targe
 
 
 def convert_dms_to_decimal(dms_value, ref) -> float:
-    degrees = float(dms_value[0])
-    minutes = float(dms_value[1])
-    seconds = float(dms_value[2])
+    if not isinstance(dms_value, (list, tuple)) or len(dms_value) != 3:
+        raise ValueError("Invalid GPS coordinate format")
+
+    def _ratio_to_float(component) -> float:
+        # Pillow may expose EXIF rationals as IFDRational, tuples, or plain numbers.
+        if hasattr(component, "numerator") and hasattr(component, "denominator"):
+            denominator = float(component.denominator) if component.denominator else 1.0
+            return float(component.numerator) / denominator
+        if isinstance(component, (tuple, list)) and len(component) == 2:
+            numerator = float(component[0])
+            denominator = float(component[1]) if component[1] else 1.0
+            return numerator / denominator
+        return float(component)
+
+    degrees = _ratio_to_float(dms_value[0])
+    minutes = _ratio_to_float(dms_value[1])
+    seconds = _ratio_to_float(dms_value[2])
     decimal = degrees + (minutes / 60.0) + (seconds / 3600.0)
     if ref in ("S", "W"):
         decimal = -decimal
@@ -521,7 +535,18 @@ def extract_exif_location_and_time(image_path: str) -> tuple[float, float, datet
     if not exif:
         raise HTTPException(status_code=400, detail="Image must contain EXIF metadata with GPS coordinates and timestamp.")
 
-    gps_info = exif.get(34853)
+    gps_info = None
+    if hasattr(exif, "get_ifd"):
+        try:
+            gps_info = exif.get_ifd(34853)
+        except Exception:
+            gps_info = None
+
+    if not gps_info:
+        legacy_gps_info = exif.get(34853)
+        if isinstance(legacy_gps_info, dict):
+            gps_info = legacy_gps_info
+
     exif_timestamp = exif.get(36867) or exif.get(306)
 
     if not gps_info:
@@ -532,11 +557,14 @@ def extract_exif_location_and_time(image_path: str) -> tuple[float, float, datet
     if isinstance(exif_timestamp, bytes):
         exif_timestamp = exif_timestamp.decode(errors="ignore")
 
+    if not isinstance(gps_info, dict):
+        raise HTTPException(status_code=400, detail="Image EXIF GPS metadata is malformed.")
+
     gps_data = {GPSTAGS.get(tag, tag): value for tag, value in gps_info.items()}
-    lat = gps_data.get("GPSLatitude")
-    lat_ref = gps_data.get("GPSLatitudeRef")
-    lon = gps_data.get("GPSLongitude")
-    lon_ref = gps_data.get("GPSLongitudeRef")
+    lat = gps_data.get("GPSLatitude") or gps_data.get(2)
+    lat_ref = gps_data.get("GPSLatitudeRef") or gps_data.get(1)
+    lon = gps_data.get("GPSLongitude") or gps_data.get(4)
+    lon_ref = gps_data.get("GPSLongitudeRef") or gps_data.get(3)
 
     if isinstance(lat_ref, bytes):
         lat_ref = lat_ref.decode(errors="ignore")

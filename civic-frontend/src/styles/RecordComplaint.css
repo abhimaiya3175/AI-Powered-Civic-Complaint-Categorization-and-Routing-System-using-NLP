@@ -433,11 +433,20 @@
 }
 
 /* ── Success Card ──────────────────────────────────────────────── */
-.success-card {
+.record-complaint-page {
   width: 100%;
-  max-width: 520px;
+  min-height: calc(100dvh - 160px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-md) 0;
+}
+
+.success-card {
+  width: min(100%, 860px);
   padding: var(--space-2xl);
   text-align: center;
+  margin: 0 auto;
   animation: fadeInUp 0.4s ease-out;
 }
 
@@ -592,6 +601,11 @@
 
 /* ── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
+  .record-complaint-page {
+    min-height: auto;
+    align-items: flex-start;
+  }
+
   .hero-title {
     font-size: 2rem;
   }
@@ -640,6 +654,10 @@
 }
 
 @media (max-width: 480px) {
+  .success-card {
+    padding: var(--space-lg);
+  }
+
   .hero-title {
     font-size: 1.75rem;
   }

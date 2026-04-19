@@ -117,11 +117,13 @@ python -m spacy download en_core_web_sm
 # If you add or upgrade Python packages, refresh the lock file before commit
 pip freeze > requirements.txt
 
-# Start the backend
-python main.py
+# Start the backend (recommended)
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 > Backend runs at `http://localhost:8000`
+>
+> Health check: `http://localhost:8000/health`
 
 ### 2. Setup Frontend
 
@@ -211,6 +213,7 @@ Trust policy:
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
+| `GET` | `/health` | ❌ | Service liveness/readiness probe |
 | `POST` | `/login` | ❌ | Admin login → JWT token |
 | `POST` | `/submit-complaint` | ❌ | Submit complaint with live location, optional audio/text, optional image evidence |
 | `GET` | `/complaints` | 🔐 | Paginated complaint list |
@@ -238,10 +241,27 @@ At least one of `file` or `text_note` is required.
 | **Frontend** | React 19, Vite 8, Leaflet, React Router |
 | **Backend** | FastAPI, SQLAlchemy, Pydantic |
 | **AI/ML** | OpenAI Whisper, scikit-learn, spaCy |
-| **Translation** | deep-translator (Google Translate) |
+| **Translation** | Hugging Face Transformers (IndicTrans2 primary, NLLB fallback) |
 | **Auth** | python-jose (JWT) |
 | **Database** | PostgreSQL (primary), SQLite (fallback) |
 | **DevOps** | Docker, Docker Compose |
+
+---
+
+## 🩺 Troubleshooting
+
+### Frontend says "Server error 500"
+
+- Confirm backend is running at `http://localhost:8000/health`.
+- Check backend logs (`bbmp_complaints.log`) for the exact exception.
+- For image submissions, ensure the photo contains valid EXIF GPS + timestamp metadata.
+- If EXIF is missing/invalid or location mismatch exceeds 100 meters, backend returns a clear `400` error by design.
+
+### Image submission rejected
+
+- Capture a fresh photo from the in-app camera when possible.
+- Keep GPS/location services enabled on the device/browser.
+- Ensure image capture and complaint submission happen within 10 minutes.
 
 ---
 
