@@ -8,6 +8,8 @@
   flex-direction: column;
   align-items: center;
   gap: var(--space-2xl);
+  width: 100%;
+  margin: 0 auto;
   padding: var(--space-xl) 0 var(--space-3xl);
   animation: fadeInUp 0.35s ease-out;
 }
@@ -82,9 +84,15 @@
 
 /* ── Voice Capture Card ────────────────────────────────────────── */
 .voice-capture-card {
-  width: 100%;
-  max-width: 620px;
-  padding: var(--space-2xl);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto auto;
+  gap: var(--space-lg);
+  align-items: stretch;
+  width: 95%;
+  max-width: 95vw;
+  margin: 0 auto;
+  padding: var(--space-lg);
   text-align: center;
   background: var(--color-surface);
   border: 1px solid var(--color-border-light);
@@ -102,10 +110,42 @@
   position: relative;
   z-index: 1;
   text-align: left;
-  margin-bottom: var(--space-lg);
+  margin-bottom: 0;
   padding: var(--space-md);
   border: 1px solid rgba(2, 132, 199, 0.15);
   background: rgba(255, 255, 255, 0.5);
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.voice-capture-card > .location-block {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.voice-capture-card > .image-block {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.voice-capture-card > .text-note-block:nth-of-type(3) {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.voice-capture-card > .text-note-block:nth-of-type(4) {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.voice-capture-card > .mic-area,
+.voice-capture-card > .recording-area,
+.voice-capture-card > .preview-area,
+.voice-capture-card > .submit-only-actions {
+  grid-column: span 2;
+  min-width: 0;
+  width: 100%;
 }
 
 .location-block::before,
@@ -135,6 +175,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-sm);
   margin-bottom: 0.5rem;
 }
@@ -162,6 +203,7 @@
 .image-actions {
   display: flex;
   gap: var(--space-sm);
+  flex-wrap: wrap;
   margin-top: 0.75rem;
 }
 
@@ -244,7 +286,7 @@
 }
 
 .submit-only-actions {
-  margin-top: var(--space-sm);
+  margin-top: 0;
 }
 
 /* ── Mic Button (Orb) ──────────────────────────────────────────── */
@@ -559,7 +601,22 @@
   }
 
   .voice-capture-card {
-    padding: var(--space-xl);
+    width: 100%;
+    max-width: 100%;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    padding: var(--space-md);
+  }
+
+  .voice-capture-card > .location-block,
+  .voice-capture-card > .image-block,
+  .voice-capture-card > .text-note-block,
+  .voice-capture-card > .mic-area,
+  .voice-capture-card > .recording-area,
+  .voice-capture-card > .preview-area,
+  .voice-capture-card > .submit-only-actions {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .mic-button {
