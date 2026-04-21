@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import piexif from 'piexifjs';
-import { submitComplaint } from '../services/api';
+import { submitComplaint, getVoterFingerprint } from '../services/api';
 import '../styles/RecordComplaint.css';
 import { useNavigate } from 'react-router-dom';
 
@@ -21,6 +21,90 @@ const getLanguageLabel = (languageCode) => {
   return option?.label || (languageCode || 'Unknown');
 };
 
+const formatConfidence = (value) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return 'N/A';
+  }
+  return `${(value * 100).toFixed(1)}%`;
+};
+
+const buildHighlightRanges = (text, terms) => {
+  if (!text || !Array.isArray(terms) || terms.length === 0) {
+    return [];
+  }
+
+  const normalizedTerms = [...new Set(
+    terms
+      .map((term) => String(term || '').trim().toLowerCase())
+      .filter(Boolean)
+  )].sort((a, b) => b.length - a.length);
+
+  const loweredText = text.toLowerCase();
+  const ranges = [];
+
+  const isWordChar = (char) => /[a-z0-9]/i.test(char);
+
+  normalizedTerms.forEach((term) => {
+    let searchStart = 0;
+    while (searchStart < loweredText.length) {
+      const start = loweredText.indexOf(term, searchStart);
+      if (start === -1) {
+        break;
+      }
+
+      const end = start + term.length;
+      const previousChar = start > 0 ? loweredText[start - 1] : ' ';
+      const nextChar = end < loweredText.length ? loweredText[end] : ' ';
+      const isBoundaryMatch = term.includes(' ') || (!isWordChar(previousChar) && !isWordChar(nextChar));
+
+      if (isBoundaryMatch) {
+        const overlaps = ranges.some((range) => !(end <= range.start || start >= range.end));
+        if (!overlaps) {
+          ranges.push({ start, end });
+        }
+      }
+
+      searchStart = start + 1;
+    }
+  });
+
+  return ranges.sort((a, b) => a.start - b.start);
+};
+
+const renderHighlightedText = (text, terms) => {
+  if (!text) {
+    return '';
+  }
+
+  const ranges = buildHighlightRanges(text, terms);
+  if (ranges.length === 0) {
+    return text;
+  }
+
+  const nodes = [];
+  let cursor = 0;
+
+  ranges.forEach((range, index) => {
+    if (range.start > cursor) {
+      nodes.push(<span key={`plain-${index}-${cursor}`}>{text.slice(cursor, range.start)}</span>);
+    }
+
+    nodes.push(
+      <mark key={`highlight-${index}-${range.start}`} className="reason-highlight">
+        {text.slice(range.start, range.end)}
+      </mark>
+    );
+
+    cursor = range.end;
+  });
+
+  if (cursor < text.length) {
+    nodes.push(<span key={`tail-${cursor}`}>{text.slice(cursor)}</span>);
+  }
+
+  return nodes;
+};
+
 export default function RecordComplaint() {
   const [recording, setRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
@@ -31,6 +115,8 @@ export default function RecordComplaint() {
   const [textNote, setTextNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [duplicateResult, setDuplicateResult] = useState(null);
+  const [rejectionMessage, setRejectionMessage] = useState('');
   const [duration, setDuration] = useState(0);
   const [cameraActive, setCameraActive] = useState(false);
   const [recordingLanguage, setRecordingLanguage] = useState('kn');
@@ -365,24 +451,40 @@ export default function RecordComplaint() {
         textNote,
         language: recordingLanguage,
         targetLanguage,
+        voterFingerprint: getVoterFingerprint(),
       });
 
-      setResult(response);
-      setAudioBlob(null);
+      if (response.duplicate) {
+        setDuplicateResult(response);
+        setAudioBlob(null);
+        setTextNote('');
+        setDuration(0);
+      } else {
+        setResult(response);
+      }
       setImageFile(null);
       if (imagePreviewUrl) {
         URL.revokeObjectURL(imagePreviewUrl);
         setImagePreviewUrl('');
       }
-      setTextNote('');
     } catch (err) {
-      alert(err.message || 'Failed to submit complaint. Make sure the backend is running.');
+      const msg = err.message || 'Failed to submit complaint. Make sure the backend is running.';
+      if (msg.toLowerCase().includes('irrelevant')) {
+        setRejectionMessage(msg);
+        setAudioBlob(null);
+        setTextNote('');
+        setDuration(0);
+      } else {
+        alert(msg);
+      }
     }
     setSubmitting(false);
   };
 
   const reset = () => {
     setResult(null);
+    setRejectionMessage('');
+    setDuplicateResult(null);
     setAudioBlob(null);
     setImageFile(null);
     if (imagePreviewUrl) {
@@ -392,6 +494,78 @@ export default function RecordComplaint() {
     setTextNote('');
     setDuration(0);
   };
+
+  /* ── Duplicate Detected View ────────────────────────────────── */
+  if (duplicateResult) {
+    return (
+      <div className="record-complaint-page gravless-container">
+        <div className="success-card card" style={{ borderColor: '#F59E0B', boxShadow: '0 0 0 1px #F59E0B' }}>
+          <div className="success-icon-container">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </div>
+          <h2 style={{ color: '#D97706' }}>Duplicate Issue Detected</h2>
+          <p className="success-subtext">{duplicateResult.message}</p>
+          <div className="result-grid">
+            <div className="result-item">
+              <span className="result-label">Existing Issue ID</span>
+              <span className="result-value mono">#{duplicateResult.id}</span>
+            </div>
+            <div className="result-item">
+              <span className="result-label">Category</span>
+              <span className="result-value">{duplicateResult.category}</span>
+            </div>
+            <div className="result-item">
+              <span className="result-label">Status</span>
+              <span className="result-value">{duplicateResult.status}</span>
+            </div>
+            <div className="result-item">
+              <span className="result-label">Total Votes</span>
+              <span className="result-value">👍 {duplicateResult.votes}</span>
+            </div>
+          </div>
+          <div className="success-actions">
+            <button className="btn btn-secondary" onClick={reset}>Submit Another</button>
+            <button className="btn btn-primary" onClick={() => window.location.href = '/complaints'}>View All Issues</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Rejection View ─────────────────────────────────────────── */
+  if (rejectionMessage) {
+    return (
+      <div className="record-complaint-page gravless-container">
+        <div className="success-card card" style={{ borderColor: 'var(--color-danger, #ef4444)', boxShadow: '0 0 0 1px var(--color-danger, #ef4444)' }}>
+          <div className="success-icon-container">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+          </div>
+          <h2 style={{ color: '#ef4444' }}>Submission Discarded</h2>
+          <p className="success-subtext">
+            Your recording does not appear to be a valid civic complaint and has been <strong>discarded automatically</strong> by the AI classifier.
+          </p>
+          <div className="result-transcript" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '8px', padding: '1rem', marginTop: '1rem' }}>
+            <span className="result-label">Reason</span>
+            <p className="transcript-text" style={{ marginTop: '0.4rem' }}>{rejectionMessage}</p>
+          </div>
+          <p style={{ marginTop: '1.2rem', fontSize: '0.9rem', opacity: 0.7 }}>
+            Please submit a genuine civic complaint such as a road pothole, drainage overflow, garbage issue, street light problem, etc.
+          </p>
+          <div className="success-actions">
+            <button className="btn btn-primary" onClick={reset}>Try Again</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   /* ── Success View ────────────────────────────────────────────── */
   if (result) {
@@ -453,6 +627,30 @@ export default function RecordComplaint() {
             <div className="result-transcript">
               <span className="result-label">Translated Text</span>
               <p className="transcript-text">{result.translated_text}</p>
+            </div>
+          )}
+
+          {result.category_explanation && (
+            <div className="result-transcript explanation-card">
+              <span className="result-label">Why This Category (NLP Evidence)</span>
+              <p className="explanation-meta">
+                TF-IDF + Naive Bayes model · Confidence: {formatConfidence(result.category_explanation?.confidence)}
+              </p>
+              <p className="transcript-text">
+                {renderHighlightedText(
+                  result.classification_text || result.translated_text || result.transcribed_text || '',
+                  result.category_explanation?.highlight_terms || []
+                )}
+              </p>
+              {Array.isArray(result.category_explanation?.top_features) && result.category_explanation.top_features.length > 0 && (
+                <div className="reason-tags" aria-label="Top words influencing category prediction">
+                  {result.category_explanation.top_features.map((feature, index) => (
+                    <span key={`${feature.term}-${index}`} className="reason-tag">
+                      {feature.term} ({feature.importance_percent}%)
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

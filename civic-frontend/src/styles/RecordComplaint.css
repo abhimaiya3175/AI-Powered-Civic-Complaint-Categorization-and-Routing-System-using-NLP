@@ -529,6 +529,47 @@
   color: var(--color-text-body);
 }
 
+.explanation-card {
+  border-color: rgba(2, 132, 199, 0.35);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(240, 249, 255, 0.98) 100%);
+}
+
+.explanation-meta {
+  margin: 0 0 var(--space-sm);
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.reason-highlight {
+  display: inline;
+  color: #0b1f44;
+  background: linear-gradient(180deg, rgba(255, 239, 122, 0.25) 0%, rgba(255, 214, 10, 0.58) 100%);
+  border-radius: 0.25rem;
+  padding: 0 0.2rem;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.reason-tags {
+  margin-top: var(--space-md);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.reason-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(2, 132, 199, 0.35);
+  background: rgba(2, 132, 199, 0.08);
+  color: #0c4a6e;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.25rem 0.6rem;
+}
+
 .success-actions {
   display: flex;
   gap: var(--space-md);

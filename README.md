@@ -108,7 +108,21 @@ venv\Scripts\activate        # Windows
 copy .env.example .env       # Windows
 # cp .env.example .env       # macOS/Linux
 
-# Edit .env and set strong SECRET_KEY / DB credentials
+# You MUST edit .env and set strong SECRET_KEY and DB_PASSWORD.
+# Example of what your .env should look like:
+#
+# # App secrets
+# SECRET_KEY=<your-very-long-random-secret>
+# JWT_ALGORITHM=HS256
+# ADMIN_USERNAME=admin
+# ADMIN_PASSWORD=<your-secure-admin-password>
+#
+# # Database settings
+# DB_USER=postgres
+# DB_PASSWORD=<your-secure-db-password>
+# DB_HOST=localhost
+# DB_PORT=5432
+# DB_NAME=bbmp_complaints
 
 # Install dependencies
 pip install -r requirements.txt
@@ -151,7 +165,9 @@ docker-compose up -d db
 
 | Role | Username | Password |
 |------|----------|----------|
-| Admin | `ADMIN_USERNAME` (default: `admin`) | `ADMIN_PASSWORD` from `.env` |
+| Admin | `ADMIN_USERNAME` from `.env` | `ADMIN_PASSWORD` from `.env` |
+
+> ⚠️ **Note:** The backend strictly reads these credentials (as well as `SECRET_KEY` and `DB_PASSWORD`) from your `.env` file. Do not hardcode them in any code files.
 
 ---
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getComplaints, verifyComplaint, getStats, loginAdmin, getAudioUrl } from '../services/api';
+import { getComplaints, verifyComplaint, getStats, loginAdmin, getAudioUrl, getComplaintTimeline } from '../services/api';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import '../styles/ComplaintList.css';
@@ -18,6 +18,8 @@ export default function ComplaintList() {
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('latest');
   const [stats, setStats] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('bbmp_token') || '');
   const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem('bbmp_token'));
@@ -32,6 +34,13 @@ export default function ComplaintList() {
   const [playingId, setPlayingId] = useState(null);
   const [audioSources, setAudioSources] = useState({});
   const [audioLoading, setAudioLoading] = useState({});
+
+  // admin note state per complaint
+  const [adminNotes, setAdminNotes] = useState({});
+  // timeline state per complaint
+  const [timelines, setTimelines] = useState({});
+  const [tlLoading, setTlLoading] = useState({});
+  const [tlOpen, setTlOpen] = useState({});
 
   /* ── Auth ─────────────────────────────────────────────────────── */
   const handleLogin = async (e) => {
@@ -88,13 +97,37 @@ export default function ComplaintList() {
 
  
 
-  /* ── HITL: Verify ────────────────────────────────────────────── */
-  const handleVerify = async (id) => {
+  /* ── HITL: Status Update ──────────────────────────────────────── */
+  const handleStatusUpdate = async (id, newStatus) => {
     try {
-      await verifyComplaint(token, id);
+      await verifyComplaint(token, id, { status: newStatus, note: (adminNotes[id] || '').trim() || undefined });
+      setAdminNotes((prev) => ({ ...prev, [id]: '' }));
+      // refresh timeline if open
+      if (tlOpen[id]) await loadTimeline(id);
       fetchComplaints();
       fetchStats();
-    } catch { alert('Failed to verify complaint'); }
+    } catch (e) { alert(e.message || 'Failed to update complaint'); }
+  };
+
+  /* ── Timeline ────────────────────────────────────────────────── */
+  const loadTimeline = async (id) => {
+    setTlLoading((prev) => ({ ...prev, [id]: true }));
+    try {
+      const data = await getComplaintTimeline(id);
+      setTimelines((prev) => ({ ...prev, [id]: data.timeline || [] }));
+    } catch { setTimelines((prev) => ({ ...prev, [id]: [] })); }
+    setTlLoading((prev) => ({ ...prev, [id]: false }));
+  };
+
+  const toggleTimeline = async (id) => {
+    const isCurrentlyOpen = tlOpen[id];
+    // Accordion approach: only one open at a time
+    if (!isCurrentlyOpen) {
+      setTlOpen({ [id]: true });
+      if (!timelines[id]) await loadTimeline(id);
+    } else {
+      setTlOpen({});
+    }
   };
 
   /* ── Helpers ─────────────────────────────────────────────────── */
@@ -127,12 +160,21 @@ export default function ComplaintList() {
     }
   };
 
-  const filtered = complaints.filter(
-    (c) => filter === 'all' || (c.status || '').toLowerCase() === filter
-  );
+  const filtered = complaints
+    .filter((c) => filter === 'all' || (c.status || '').toLowerCase() === filter.toLowerCase())
+    .filter((c) => categoryFilter === 'all' || c.category === categoryFilter)
+    .sort((a, b) => {
+      if (sortBy === 'most_voted') return (b.votes || 0) - (a.votes || 0);
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+
+  const maxVotes = Math.max(...filtered.map((c) => c.votes || 0), 0);
+  const HIGH_PRIORITY_THRESHOLD = Math.max(3, Math.round(maxVotes * 0.6));
 
   const getStatusBadge = (status) => {
     if (status === 'Verified') return 'badge badge-verified';
+    if (status === 'In Progress') return 'badge badge-inprogress';
+    if (status === 'Resolved') return 'badge badge-resolved';
     return 'badge badge-pending';
   };
 
@@ -334,18 +376,39 @@ export default function ComplaintList() {
       {/* Filters */}
       <div className="filters-bar">
         <div className="filter-pills">
-          {['all', 'pending', 'verified'].map((f) => (
+          {['all', 'pending', 'Verified', 'In Progress', 'Resolved'].map((f) => (
             <button
               key={f}
+              className={`filter-pill ${filter === f ? 'active' : ''}`}
               onClick={() => setFilter(f)}
             >
-              {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
-              {f === 'pending' && stats ? ` (${stats.pending})` : ''}
-              {f === 'verified' && stats ? ` (${stats.verified})` : ''}
+              {f === 'all' ? 'All' : f}
             </button>
           ))}
         </div>
-        <span className="results-count">{totalItems} total complaints</span>
+        <div className="filter-right">
+          <select
+            className="admin-filter-select"
+            value={categoryFilter}
+            onChange={(e) => { setCategoryFilter(e.target.value); }}
+          >
+            <option value="all">All Categories</option>
+            {['Street Light','Garbage / Sanitation','Road Repair','Drainage / SWD','Water Supply',
+              'Health / Sanitation','Parks','Parks / Forest','Town Planning','Veterinary',
+              'Advertisement','Revenue','Traffic','Others'].map((cat) => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+          <select
+            className="admin-filter-select"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+          >
+            <option value="latest">Latest First</option>
+            <option value="most_voted">Most Voted</option>
+          </select>
+          <span className="results-count">{totalItems} total</span>
+        </div>
       </div>
 
       {/* Complaint Cards */}
@@ -359,12 +422,22 @@ export default function ComplaintList() {
         </div>
       ) : (
         <div className="complaints-grid">
-          {filtered.map((c) => (
-            <div key={c.id} className={`complaint-card card ${c.status === 'Verified' ? 'verified-glow' : 'pending-glow'}`} id={`complaint-${c.id}`}>
+          {filtered.map((c) => {
+            const isHighPriority = (c.votes || 0) >= HIGH_PRIORITY_THRESHOLD && HIGH_PRIORITY_THRESHOLD >= 1;
+            return (
+            <div key={c.id} className={`complaint-card card ${c.status === 'Verified' ? 'verified-glow' : c.status === 'Resolved' ? 'resolved-glow' : c.status === 'In Progress' ? 'inprogress-glow' : 'pending-glow'}`} id={`complaint-${c.id}`}>
               {/* Card Header */}
               <div className="ccard-header">
-                <span className="ccard-id mono">#{c.id}</span>
-                <span className={getStatusBadge(c.status)}>{c.status}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span className="ccard-id mono">#{c.id}</span>
+                  {isHighPriority && <span className="badge-priority">🔥 High Priority</span>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {(c.votes || 0) > 0 && (
+                    <span className="vote-count-badge">👍 {c.votes}</span>
+                  )}
+                  <span className={getStatusBadge(c.status)}>{c.status}</span>
+                </div>
               </div>
 
               {/* Card Body */}
@@ -420,19 +493,64 @@ export default function ComplaintList() {
                 </div>
               )}
 
-              {/* Footer */}
-              {c.status !== 'Verified' && (
-                <div className="ccard-footer">
-                  <button className="btn btn-success btn-sm" onClick={() => handleVerify(c.id)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
+              {/* Admin Note */}
+              <div className="admin-note-block">
+                <textarea
+                  className="admin-note-input"
+                  placeholder="Add a note before updating status (optional)"
+                  rows={2}
+                  value={adminNotes[c.id] || ''}
+                  onChange={(e) => setAdminNotes((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                />
+              </div>
+
+              {/* Footer: Status Actions */}
+              <div className="ccard-footer">
+                {c.status !== 'Verified' && c.status !== 'In Progress' && c.status !== 'Resolved' && (
+                  <button className="btn btn-success btn-sm" onClick={() => handleStatusUpdate(c.id, 'Verified')}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     Verify
                   </button>
+                )}
+                {c.status !== 'In Progress' && c.status !== 'Resolved' && (
+                  <button className="btn btn-info btn-sm" onClick={() => handleStatusUpdate(c.id, 'In Progress')}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    In Progress
+                  </button>
+                )}
+                {c.status !== 'Resolved' && (
+                  <button className="btn btn-resolved btn-sm" onClick={() => handleStatusUpdate(c.id, 'Resolved')}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    Resolved
+                  </button>
+                )}
+                <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => toggleTimeline(c.id)}>
+                  Timeline {tlOpen[c.id] ? '▲' : '▼'}
+                </button>
+              </div>
+
+              {/* Inline Timeline */}
+              {tlOpen[c.id] && (
+                <div className="admin-timeline-panel">
+                  {tlLoading[c.id] ? (
+                    <p className="ccard-audio-loading">Loading timeline…</p>
+                  ) : (timelines[c.id] || []).length === 0 ? (
+                    <p className="ccard-audio-loading">No timeline entries yet.</p>
+                  ) : (
+                    <div className="admin-timeline">
+                      {(timelines[c.id] || []).map((entry, i) => (
+                        <div key={i} className="admin-tl-entry">
+                          <span className="admin-tl-status">{entry.status}</span>
+                          <span className="admin-tl-time">{entry.created_at ? new Date(entry.created_at).toLocaleString('en-IN') : ''}</span>
+                          {entry.note && <span className="admin-tl-note">{entry.note}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          ))}
+          )})}
         </div>
       )}
 

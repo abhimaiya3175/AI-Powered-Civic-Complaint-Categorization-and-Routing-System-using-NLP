@@ -4,6 +4,8 @@ import logging
 import mimetypes
 import asyncio
 import sys
+import threading
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Query, Request
@@ -26,7 +28,7 @@ import math
 import bcrypt
 import speech_recognition as sr
 from pydub import AudioSegment
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 try:
     from IndicTransToolkit import IndicProcessor  # type: ignore
@@ -75,7 +77,11 @@ logging.basicConfig(
 logger = logging.getLogger("bbmp")
 
 # ====================== CONFIG ======================
-SECRET_KEY = os.getenv("SECRET_KEY", "replace-with-a-strong-secret")
+# All secrets MUST be set in .env
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY is missing. Please set it in your .env file.")
+
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 INDICTRANS2_MODEL_NAME = "ai4bharat/indictrans2-indic-en-dist-200M"
 NLLB_FALLBACK_MODEL_NAME = "facebook/nllb-200-distilled-600M"
@@ -93,7 +99,8 @@ INDIC_LANG_TAGS: Dict[str, str] = {
 }
 
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
+# Ensure we strictly read the password from .env
+DB_PASSWORD = os.getenv("DB_PASSWORD") 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "bbmp_complaints")
@@ -111,6 +118,67 @@ ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png"}
 GPS_TOLERANCE_METERS = 100.0
 MAX_IMAGE_AGE_SECONDS = 10 * 60
+
+MODEL_PATH_CANDIDATES = [
+    os.getenv("MODEL_PATH", "").strip(),
+    "Models/model_bbmp.pkl",
+    "model_bbmp.pkl",
+]
+
+ENABLE_ZERO_SHOT_FALLBACK = os.getenv("ENABLE_ZERO_SHOT_FALLBACK", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+ZERO_SHOT_MODEL_NAME = os.getenv("ZERO_SHOT_MODEL_NAME", "valhalla/distilbart-mnli-12-1").strip()
+ZERO_SHOT_MIN_CONFIDENCE = float(os.getenv("ZERO_SHOT_MIN_CONFIDENCE", "0.85"))
+ZERO_SHOT_MIN_SCORE = float(os.getenv("ZERO_SHOT_MIN_SCORE", "0.55"))
+ZERO_SHOT_SPARSE_MIN_SCORE = float(os.getenv("ZERO_SHOT_SPARSE_MIN_SCORE", "0.60"))
+PRIMARY_MIN_EXPLANATORY_FEATURES = int(os.getenv("PRIMARY_MIN_EXPLANATORY_FEATURES", "2"))
+
+GENERIC_PRIMARY_FEATURE_TERMS = {
+    "street",
+    "road",
+    "area",
+    "near",
+    "public",
+    "issue",
+    "problem",
+    "big",
+    "small",
+}
+
+CATEGORY_SEMANTIC_HINTS = {
+    "Street Light": "street light electrical lamp not working",
+    "Garbage / Sanitation": "garbage waste sanitation not collected",
+    "Road Repair": "road pothole damaged road repair",
+    "Drainage / SWD": "drainage overflow sewer storm water drain",
+    "Water Supply": "water supply no water tap dry",
+    "Health / Sanitation": "health sanitation mosquito public health",
+    "Parks / Forest": "park forest tree issue",
+    "Parks": "park playground public park issue",
+    "Town Planning": "town planning building plan issue",
+    "Veterinary": "veterinary animal dog cattle issue",
+    "Advertisement": "advertisement hoarding banner issue",
+    "Revenue": "revenue property tax khata issue",
+    "Others": "other civic complaint",
+}
+
+KANNADA_POTHOLE_TERMS = {
+    "ಗುಂಡಿ",
+    "ಗುಂಡಿಗಳು",
+    "ಗುಂಡಿಯ",
+    "ಗುಂಡಿಯನ್ನು",
+    "ಗುಂಡಿಯಲ್ಲಿ",
+    "ಗುಂಡಿಗಳಿಗೆ",
+    "ಗುಂಡಿಗಳ",
+    "ಗಂಡಿ",
+}
+KANNADA_POTHOLE_TRANSLIT_PATTERN = re.compile(r"\bgund[iy](?:galu|ge|alli|inda|yalli)?\b", re.IGNORECASE)
+
+zero_shot_classifier = None
+zero_shot_classifier_lock = threading.Lock()
 
 import urllib.parse
 encoded_password = urllib.parse.quote_plus(DB_PASSWORD)
@@ -159,6 +227,22 @@ class Complaint(Base):
     trust_level = Column(String, default="medium")
     verification_mode = Column(String, default="manual_review")
     status = Column(String, default="pending")
+    votes = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ComplaintVote(Base):
+    __tablename__ = "complaint_votes"
+    id = Column(Integer, primary_key=True, index=True)
+    complaint_id = Column(Integer, index=True)
+    voter_fingerprint = Column(String, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ComplaintTimeline(Base):
+    __tablename__ = "complaint_timeline"
+    id = Column(Integer, primary_key=True, index=True)
+    complaint_id = Column(Integer, index=True)
+    status = Column(String)
+    note = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
@@ -188,6 +272,7 @@ def ensure_complaints_schema_upgrades():
         "image_live_distance_meters": "FLOAT",
         "trust_level": "VARCHAR DEFAULT 'medium'",
         "verification_mode": "VARCHAR DEFAULT 'manual_review'",
+        "votes": "INTEGER DEFAULT 0",
     }
 
     inspector = inspect(engine)
@@ -203,12 +288,111 @@ def ensure_complaints_schema_upgrades():
 
 ensure_complaints_schema_upgrades()
 
+
+def load_classifier_assets() -> Tuple[Dict[str, Any], str]:
+    """Load classifier/vectorizer from the first valid model artifact path."""
+    seen = set()
+    candidates: list[Path] = []
+    for candidate in MODEL_PATH_CANDIDATES:
+        candidate = (candidate or "").strip()
+        if not candidate:
+            continue
+        resolved = Path(candidate).resolve()
+        if str(resolved) in seen:
+            continue
+        seen.add(str(resolved))
+        candidates.append(resolved)
+
+    last_error: Optional[Exception] = None
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            with candidate.open("rb") as model_file:
+                package = pickle.load(model_file)
+
+            if "vectorizer" not in package or "classifier" not in package:
+                raise ValueError("Model package must contain 'vectorizer' and 'classifier'.")
+
+            return package, str(candidate)
+        except Exception as exc:
+            last_error = exc
+            logger.error("Failed loading model artifact %s: %s", candidate, exc)
+
+    search_list = ", ".join(str(path) for path in candidates)
+    raise RuntimeError(
+        f"Could not load a valid classifier model. Checked: {search_list}."
+    ) from last_error
+
+
+def _get_zero_shot_classifier():
+    """Lazily initialize a semantic zero-shot classifier for low-confidence fallback."""
+    global zero_shot_classifier
+
+    if zero_shot_classifier is not None:
+        return zero_shot_classifier
+
+    with zero_shot_classifier_lock:
+        if zero_shot_classifier is not None:
+            return zero_shot_classifier
+
+        logger.info("Loading zero-shot semantic classifier: %s", ZERO_SHOT_MODEL_NAME)
+        zero_shot_classifier = pipeline(
+            "zero-shot-classification",
+            model=ZERO_SHOT_MODEL_NAME,
+            device=-1,
+        )
+        logger.info("Zero-shot semantic classifier loaded successfully")
+
+    return zero_shot_classifier
+
+
+def _predict_zero_shot_category_sync(text: str, categories: list[str]) -> Tuple[Optional[str], float]:
+    """Run semantic category prediction synchronously (used via asyncio.to_thread)."""
+    if not text or not categories:
+        return None, 0.0
+
+    clf_zero_shot = _get_zero_shot_classifier()
+
+    semantic_to_category: Dict[str, str] = {}
+    candidate_labels: list[str] = []
+    for category in categories:
+        category_name = str(category)
+        semantic_label = CATEGORY_SEMANTIC_HINTS.get(category_name, category_name)
+
+        if semantic_label in semantic_to_category and semantic_to_category[semantic_label] != category_name:
+            semantic_label = f"{semantic_label} ({category_name})"
+
+        semantic_to_category[semantic_label] = category_name
+        candidate_labels.append(semantic_label)
+
+    result = clf_zero_shot(text, candidate_labels, multi_label=False)
+    top_label = result["labels"][0] if result.get("labels") else None
+    top_score = float(result["scores"][0]) if result.get("scores") else 0.0
+
+    if not top_label:
+        return None, top_score
+
+    return semantic_to_category.get(str(top_label), str(top_label)), top_score
+
 # ====================== ML / NLP LOAD ======================
 logger.info("Loading model_bbmp.pkl …")
-with open("Models/model_bbmp.pkl", "rb") as f:
-    model_package = pickle.load(f)
+model_package, loaded_model_path = load_classifier_assets()
 vectorizer = model_package["vectorizer"]
 clf = model_package["classifier"]
+
+MODEL_RUNTIME_INFO = {
+    "path": loaded_model_path,
+    "classes": [str(item) for item in getattr(clf, "classes_", [])],
+    "class_count": len(getattr(clf, "classes_", [])),
+    "vocab_size": len(getattr(vectorizer, "vocabulary_", {})),
+}
+logger.info(
+    "Classifier connected: path=%s classes=%d vocab_size=%d",
+    MODEL_RUNTIME_INFO["path"],
+    MODEL_RUNTIME_INFO["class_count"],
+    MODEL_RUNTIME_INFO["vocab_size"],
+)
 
 logger.info("Loading spaCy en_core_web_sm …")
 try:
@@ -246,11 +430,45 @@ async def health_check():
         db_ok = True
     except Exception:
         db_ok = False
-    status = "ok" if db_ok else "degraded"
+
+    model_ok = bool(MODEL_RUNTIME_INFO.get("class_count")) and bool(MODEL_RUNTIME_INFO.get("vocab_size"))
+    status = "ok" if (db_ok and model_ok) else "degraded"
     return JSONResponse(
-        content={"status": status, "db": "connected" if db_ok else "unreachable"},
-        status_code=200 if db_ok else 503,
+        content={
+            "status": status,
+            "db": "connected" if db_ok else "unreachable",
+            "classifier": {
+                "connected": model_ok,
+                "path": MODEL_RUNTIME_INFO.get("path"),
+                "classes": MODEL_RUNTIME_INFO.get("class_count", 0),
+                "vocabulary": MODEL_RUNTIME_INFO.get("vocab_size", 0),
+                "zero_shot_fallback_enabled": ENABLE_ZERO_SHOT_FALLBACK,
+                "zero_shot_fallback_loaded": zero_shot_classifier is not None,
+            },
+        },
+        status_code=200 if (db_ok and model_ok) else 503,
     )
+
+
+@app.get("/model/status", tags=["ops"])
+async def model_status():
+    """Expose classifier connectivity details for quick runtime verification."""
+    return {
+        "connected": True,
+        "path": MODEL_RUNTIME_INFO.get("path"),
+        "class_count": MODEL_RUNTIME_INFO.get("class_count", 0),
+        "vocabulary_size": MODEL_RUNTIME_INFO.get("vocab_size", 0),
+        "classes": MODEL_RUNTIME_INFO.get("classes", []),
+        "zero_shot_fallback": {
+            "enabled": ENABLE_ZERO_SHOT_FALLBACK,
+            "loaded": zero_shot_classifier is not None,
+            "model": ZERO_SHOT_MODEL_NAME,
+            "min_primary_confidence": ZERO_SHOT_MIN_CONFIDENCE,
+            "min_semantic_score": ZERO_SHOT_MIN_SCORE,
+            "min_semantic_score_sparse": ZERO_SHOT_SPARSE_MIN_SCORE,
+            "primary_min_explanatory_features": PRIMARY_MIN_EXPLANATORY_FEATURES,
+        },
+    }
 
 
 # ====================== DEPENDENCIES ======================
@@ -282,6 +500,99 @@ def extract_location(text: str) -> str:
     doc = nlp(text)
     locations = [ent.text for ent in doc.ents if ent.label_ in ("GPE", "LOC", "FAC")]
     return ", ".join(locations) if locations else "Unknown"
+
+
+def _base_category_explanation(text: str) -> Dict[str, Any]:
+    return {
+        "method": "tfidf_multinomial_nb",
+        "summary": "Top statistically weighted terms from the trained NLP classifier (not rule-based).",
+        "classification_text": (text or "").strip(),
+        "confidence": None,
+        "top_features": [],
+        "highlight_terms": [],
+    }
+
+
+def explain_category_prediction(text: str, text_vector, predicted_label: str, top_k: int = 5) -> Dict[str, Any]:
+    """
+    Explain why a category was predicted by ranking feature contributions
+    from the trained TF-IDF + Naive Bayes model.
+    """
+    explanation = _base_category_explanation(text)
+
+    try:
+        if text_vector is None or text_vector.nnz == 0:
+            return explanation
+
+        class_labels = list(getattr(clf, "classes_", []))
+        if predicted_label not in class_labels:
+            return explanation
+
+        predicted_idx = class_labels.index(predicted_label)
+        rival_idx = predicted_idx
+
+        if hasattr(clf, "predict_proba"):
+            probabilities = clf.predict_proba(text_vector)[0]
+            explanation["confidence"] = round(float(probabilities[predicted_idx]), 4)
+            ranked_class_indices = sorted(
+                range(len(probabilities)),
+                key=lambda idx: probabilities[idx],
+                reverse=True,
+            )
+            rival_idx = next((idx for idx in ranked_class_indices if idx != predicted_idx), predicted_idx)
+
+        feature_names = vectorizer.get_feature_names_out()
+        row = text_vector.tocsr()[0]
+
+        if not hasattr(clf, "feature_log_prob_"):
+            return explanation
+
+        pred_log_probs = clf.feature_log_prob_[predicted_idx]
+        rival_log_probs = clf.feature_log_prob_[rival_idx] if rival_idx != predicted_idx else pred_log_probs
+
+        scored_terms = []
+        for feature_idx, tfidf_value in zip(row.indices, row.data):
+            term = str(feature_names[feature_idx]).strip()
+            if not term:
+                continue
+
+            weight_delta = float(pred_log_probs[feature_idx] - rival_log_probs[feature_idx])
+            contribution = float(tfidf_value) * weight_delta
+            if contribution <= 0:
+                continue
+
+            scored_terms.append(
+                {
+                    "term": term,
+                    "contribution": contribution,
+                    "tfidf": float(tfidf_value),
+                    "weight_delta": weight_delta,
+                }
+            )
+
+        if not scored_terms:
+            return explanation
+
+        scored_terms.sort(key=lambda item: item["contribution"], reverse=True)
+        top_terms = scored_terms[:top_k]
+        total_contribution = sum(item["contribution"] for item in top_terms) or 1.0
+
+        explanation["top_features"] = [
+            {
+                "term": item["term"],
+                "contribution": round(item["contribution"], 4),
+                "tfidf": round(item["tfidf"], 4),
+                "weight_delta": round(item["weight_delta"], 4),
+                "importance_percent": round((item["contribution"] / total_contribution) * 100.0, 1),
+            }
+            for item in top_terms
+        ]
+        explanation["highlight_terms"] = [item["term"] for item in top_terms]
+
+        return explanation
+    except Exception as exc:
+        logger.warning("Category explanation failed: %s", exc)
+        return explanation
 
 def validate_audio_file(file: UploadFile):
     """Reject uploads that are not audio files (by extension + MIME type)."""
@@ -339,6 +650,54 @@ def normalize_language_code(language_value: str, field_name: str) -> str:
             detail=f"Invalid {field_name} '{language_value}'. Allowed values: {allowed}",
         )
     return normalized
+
+
+def apply_civic_translation_glossary(
+    source_text: str,
+    translated_text: str,
+    source_language: str,
+    target_language: str,
+) -> str:
+    """Patch known civic-term mistranslations for Kannada -> English outputs."""
+    candidate = (translated_text or "").strip()
+    source_clean = (source_text or "").strip()
+
+    if not candidate or target_language != "en":
+        return candidate
+
+    translit_match = bool(KANNADA_POTHOLE_TRANSLIT_PATTERN.search(source_clean.lower()))
+    is_kannada_source = (
+        source_language == "kn"
+        or bool(re.search(r"[\u0C80-\u0CFF]", source_clean))
+        or translit_match
+    )
+    if not is_kannada_source:
+        return candidate
+
+    source_lower = source_clean.lower()
+    pothole_in_source = (
+        any(term in source_lower for term in KANNADA_POTHOLE_TERMS)
+        or translit_match
+    )
+    if not pothole_in_source:
+        return candidate
+
+    corrected = candidate
+    corrected = re.sub(r"\bstreet buttons?\b", "street pothole", corrected, flags=re.IGNORECASE)
+    corrected = re.sub(r"\broad buttons?\b", "road pothole", corrected, flags=re.IGNORECASE)
+    corrected = re.sub(r"\bbuttons?\b", "pothole", corrected, flags=re.IGNORECASE)
+    corrected = re.sub(r"\b(pits?|holes?)\b", "pothole", corrected, flags=re.IGNORECASE)
+
+    if not re.search(r"\bpotholes?\b", corrected, flags=re.IGNORECASE):
+        if re.search(r"\b(street|road)\b", corrected, flags=re.IGNORECASE):
+            corrected = re.sub(r"\b(street|road)\b", r"\1 pothole", corrected, count=1, flags=re.IGNORECASE)
+        else:
+            corrected = f"Pothole complaint: {corrected}"
+
+    corrected = re.sub(r"\s+", " ", corrected).strip()
+    if corrected and corrected[-1] not in ".!?":
+        corrected += "."
+    return corrected
 
 
 def _translate_batch_sync(
@@ -495,7 +854,19 @@ async def translate_text_with_indictrans2(text: str, source_language: str, targe
             )
 
         translated_text = (translated_batch[0] if translated_batch else "").strip()
-        return translated_text or clean_text
+        if not translated_text:
+            return clean_text
+
+        corrected_text = apply_civic_translation_glossary(
+            clean_text,
+            translated_text,
+            source_language,
+            target_language,
+        )
+        if corrected_text != translated_text:
+            logger.info("Applied Kannada civic glossary correction: %s -> %s", translated_text, corrected_text)
+
+        return corrected_text or clean_text
     except Exception as exc:
         logger.error("IndicTrans2 translation failed (%s->%s): %s", source_language, target_language, exc)
         return clean_text
@@ -727,6 +1098,7 @@ async def submit_complaint(
     text_note: str = Form(default=""),
     language: str = Form(default="en"),
     target_language: str = Form(default="en"),
+    voter_fingerprint: str = Form(default=""),
     db: Session = Depends(get_db),
 ):
     """
@@ -910,14 +1282,106 @@ async def submit_complaint(
                 "en",
             ) or transcribed_text
 
+    category_explanation = _base_category_explanation(english_text_for_classification)
     try:
-        category = clf.predict(vectorizer.transform([english_text_for_classification]))[0]
+        text_vector = vectorizer.transform([english_text_for_classification])
+        category = str(clf.predict(text_vector)[0])
+        primary_category = category
+        category_explanation = explain_category_prediction(
+            english_text_for_classification,
+            text_vector,
+            category,
+        )
+
+        primary_confidence = category_explanation.get("confidence")
+        top_features = category_explanation.get("top_features") if isinstance(category_explanation, dict) else []
+        top_features = top_features if isinstance(top_features, list) else []
+        top_terms = [
+            str(item.get("term", "")).strip().lower()
+            for item in top_features
+            if isinstance(item, dict) and item.get("term")
+        ]
+
+        low_primary_confidence = (
+            isinstance(primary_confidence, (float, int))
+            and float(primary_confidence) < ZERO_SHOT_MIN_CONFIDENCE
+        )
+        sparse_primary_signal = len(top_terms) < PRIMARY_MIN_EXPLANATORY_FEATURES
+        generic_primary_signal = bool(top_terms) and all(
+            term in GENERIC_PRIMARY_FEATURE_TERMS for term in top_terms
+        )
+
+        if (
+            ENABLE_ZERO_SHOT_FALLBACK
+            and (low_primary_confidence or sparse_primary_signal or generic_primary_signal)
+        ):
+            try:
+                candidate_categories = MODEL_RUNTIME_INFO.get("classes", [])
+                semantic_category, semantic_score = await asyncio.to_thread(
+                    _predict_zero_shot_category_sync,
+                    english_text_for_classification,
+                    candidate_categories,
+                )
+
+                semantic_threshold = (
+                    ZERO_SHOT_MIN_SCORE if low_primary_confidence else ZERO_SHOT_SPARSE_MIN_SCORE
+                )
+
+                if semantic_category and semantic_score >= semantic_threshold and semantic_category != category:
+                    logger.info(
+                        "Semantic fallback override: %s (%.3f) -> %s (%.3f) | low_conf=%s sparse=%s generic=%s",
+                        category,
+                        float(primary_confidence) if isinstance(primary_confidence, (float, int)) else -1.0,
+                        semantic_category,
+                        semantic_score,
+                        low_primary_confidence,
+                        sparse_primary_signal,
+                        generic_primary_signal,
+                    )
+                    category = semantic_category
+                    category_explanation = {
+                        "method": "zero_shot_nli_fallback",
+                        "summary": "Primary TF-IDF evidence was low-confidence or sparse, so semantic NLI classification was used (NLP model, not rule-based).",
+                        "classification_text": english_text_for_classification,
+                        "confidence": round(float(semantic_score), 4),
+                        "top_features": [],
+                        "highlight_terms": [],
+                        "base_model_category": primary_category,
+                        "base_model_confidence": (
+                            round(float(primary_confidence), 4)
+                            if isinstance(primary_confidence, (float, int))
+                            else None
+                        ),
+                        "fallback_trigger": {
+                            "low_primary_confidence": low_primary_confidence,
+                            "sparse_primary_signal": sparse_primary_signal,
+                            "generic_primary_signal": generic_primary_signal,
+                            "semantic_threshold": semantic_threshold,
+                        },
+                    }
+            except Exception as fallback_exc:
+                logger.warning("Semantic fallback failed: %s", fallback_exc)
+
+        category_explanation["predicted_category"] = category
         location = f"{live_latitude:.6f}, {live_longitude:.6f}"
         logger.info(f"Category: {category} | Location: {location}")
     except Exception as e:
         logger.error(f"Classification failed: {e}")
         category = "Others"
         location = f"{live_latitude:.6f}, {live_longitude:.6f}"
+
+    if category == "Non-Civic":
+        if audio_path and os.path.exists(audio_path):
+            try: os.remove(audio_path)
+            except Exception: pass
+        if image_path and os.path.exists(image_path):
+            try: os.remove(image_path)
+            except Exception: pass
+        logger.info(f"Discarded irrelevant complaint: {transcribed_text}")
+        raise HTTPException(
+            status_code=400,
+            detail="The submitted audio/text is irrelevant and does not appear to be a valid civic complaint. It has been discarded."
+        )
 
     # 7. Validate optional image evidence authenticity and assign trust level
     image_exif_latitude = None
@@ -953,7 +1417,64 @@ async def submit_complaint(
         verification_mode = "auto_verified"
         status = "Verified"
 
-    # 8. Save to database
+    # 8. Duplicate detection — check for existing complaints nearby with same category
+    DUPLICATE_RADIUS_KM = 0.5
+    DUPLICATE_WINDOW_DAYS = 180
+    window_start = datetime.utcnow() - __import__('datetime').timedelta(days=DUPLICATE_WINDOW_DAYS)
+    dup_query = db.query(Complaint).filter(
+        Complaint.category == category,
+        Complaint.status != "Resolved",
+        Complaint.created_at >= window_start,
+    )
+    existing_dup = None
+    for candidate in dup_query.all():
+        if candidate.live_latitude and candidate.live_longitude:
+            dist = haversine_distance_meters(
+                live_latitude, live_longitude,
+                candidate.live_latitude, candidate.live_longitude,
+            )
+            if dist <= DUPLICATE_RADIUS_KM * 1000:
+                existing_dup = candidate
+                break
+        elif candidate.location and candidate.location == location:
+            existing_dup = candidate
+            break
+
+    if existing_dup:
+        # Clean up uploaded files since we won't save a new complaint
+        if audio_path and os.path.exists(audio_path):
+            try: os.remove(audio_path)
+            except Exception: pass
+        if image_path and os.path.exists(image_path):
+            try: os.remove(image_path)
+            except Exception: pass
+        # Add vote if fingerprint provided and not already voted
+        voted = False
+        fp = (voter_fingerprint or "").strip()
+        if fp:
+            already_voted = db.query(ComplaintVote).filter(
+                ComplaintVote.complaint_id == existing_dup.id,
+                ComplaintVote.voter_fingerprint == fp,
+            ).first()
+            if not already_voted:
+                db.add(ComplaintVote(complaint_id=existing_dup.id, voter_fingerprint=fp))
+                existing_dup.votes = (existing_dup.votes or 0) + 1
+                db.commit()
+                db.refresh(existing_dup)
+                voted = True
+        logger.info("Duplicate detected: new complaint matches existing #%d", existing_dup.id)
+        return {
+            "duplicate": True,
+            "id": existing_dup.id,
+            "category": existing_dup.category,
+            "location": existing_dup.location,
+            "status": existing_dup.status,
+            "votes": existing_dup.votes or 0,
+            "voted": voted,
+            "message": "This issue already exists. Your vote has been added." if voted else "This issue already exists and has been reported.",
+        }
+
+    # 9. Save new complaint to database
     complaint = Complaint(
         audio_path=audio_path,
         image_path=image_path,
@@ -972,14 +1493,19 @@ async def submit_complaint(
         trust_level=trust_level,
         verification_mode=verification_mode,
         status=status,
+        votes=0,
     )
     db.add(complaint)
     db.commit()
     db.refresh(complaint)
+    # Auto-create first timeline entry
+    db.add(ComplaintTimeline(complaint_id=complaint.id, status="Reported", note="Complaint submitted"))
+    db.commit()
     logger.info(f"Complaint saved with ID: {complaint.id}")
 
     # Return JSON response
     return {
+        "duplicate": False,
         "id": complaint.id,
         "category": complaint.category,
         "location": complaint.location,
@@ -990,9 +1516,12 @@ async def submit_complaint(
         "verification_mode": complaint.verification_mode,
         "image_live_distance_meters": complaint.image_live_distance_meters,
         "translated_text": complaint.translated_text,
+        "classification_text": category_explanation.get("classification_text", ""),
+        "category_explanation": category_explanation,
         "detected_language": complaint.language,
         "target_language": target_language_code,
         "status": complaint.status,
+        "votes": 0,
     }
 
 # ---------- Audio File Serving ----------
@@ -1089,8 +1618,9 @@ async def get_complaints(
 
 # ---------- Verify / Edit Complaint (HITL, JWT-protected) ----------
 class VerifyRequest(BaseModel):
-    category: str = None
+    category: Optional[str] = None
     status: str = "Verified"
+    note: Optional[str] = None
 
 @app.put("/complaints/{id}/verify")
 def verify_complaint(
@@ -1108,6 +1638,13 @@ def verify_complaint(
     if request.status:
         complaint.status = request.status
 
+    # Auto-append timeline entry
+    timeline_entry = ComplaintTimeline(
+        complaint_id=id,
+        status=request.status,
+        note=(request.note or "").strip() or None,
+    )
+    db.add(timeline_entry)
     db.commit()
     db.refresh(complaint)
     logger.info("Complaint #%d updated — status=%s, category=%s", id, complaint.status, complaint.category)
@@ -1119,6 +1656,149 @@ def verify_complaint(
         "translated_text": complaint.translated_text,
         "status": complaint.status,
     }
+
+
+# ---------- Vote on Complaint ----------
+class VoteRequest(BaseModel):
+    voter_fingerprint: str
+
+@app.post("/complaints/{id}/vote")
+def vote_complaint(id: int, body: VoteRequest, db: Session = Depends(get_db)):
+    """Upvote a complaint. Idempotent — one vote per fingerprint per complaint."""
+    complaint = db.query(Complaint).filter(Complaint.id == id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    fingerprint = (body.voter_fingerprint or "").strip()
+    if not fingerprint:
+        raise HTTPException(status_code=400, detail="voter_fingerprint is required")
+
+    existing_vote = db.query(ComplaintVote).filter(
+        ComplaintVote.complaint_id == id,
+        ComplaintVote.voter_fingerprint == fingerprint,
+    ).first()
+
+    if existing_vote:
+        return {"already_voted": True, "votes": complaint.votes or 0}
+
+    db.add(ComplaintVote(complaint_id=id, voter_fingerprint=fingerprint))
+    complaint.votes = (complaint.votes or 0) + 1
+    db.commit()
+    db.refresh(complaint)
+    return {"already_voted": False, "votes": complaint.votes}
+
+
+# ---------- Public Complaints Listing (no JWT) ----------
+@app.get("/complaints/public")
+def get_public_complaints(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=12, ge=1, le=100),
+    category: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    sort: str = Query(default="latest"),
+    db: Session = Depends(get_db),
+):
+    """Public-facing complaint listing — excludes Resolved, no auth needed."""
+    query = db.query(Complaint).filter(Complaint.status != "Resolved")
+    if category and category != "all":
+        query = query.filter(Complaint.category == category)
+    if status and status != "all":
+        query = query.filter(Complaint.status == status)
+    if sort == "most_voted":
+        query = query.order_by(Complaint.votes.desc(), Complaint.created_at.desc())
+    else:
+        query = query.order_by(Complaint.created_at.desc())
+
+    total = query.count()
+    pages = math.ceil(total / size) if total else 1
+    items = query.offset((page - 1) * size).limit(size).all()
+
+    return {
+        "items": [
+            {
+                "id": c.id,
+                "category": c.category,
+                "location": c.location,
+                "status": c.status,
+                "votes": c.votes or 0,
+                "translated_text": c.translated_text,
+                "original_text": c.original_text,
+                "language": c.language,
+                "trust_level": c.trust_level,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "live_latitude": c.live_latitude,
+                "live_longitude": c.live_longitude,
+            }
+            for c in items
+        ],
+        "total": total,
+        "page": page,
+        "pages": pages,
+        "size": size,
+    }
+
+
+# ---------- Resolved Complaints Archive (no JWT) ----------
+@app.get("/complaints/resolved")
+def get_resolved_complaints(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=12, ge=1, le=100),
+    category: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return only resolved complaints for archive tab."""
+    query = db.query(Complaint).filter(Complaint.status == "Resolved")
+    if category and category != "all":
+        query = query.filter(Complaint.category == category)
+    query = query.order_by(Complaint.created_at.desc())
+    total = query.count()
+    pages = math.ceil(total / size) if total else 1
+    items = query.offset((page - 1) * size).limit(size).all()
+    return {
+        "items": [
+            {
+                "id": c.id,
+                "category": c.category,
+                "location": c.location,
+                "status": c.status,
+                "votes": c.votes or 0,
+                "translated_text": c.translated_text,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in items
+        ],
+        "total": total,
+        "page": page,
+        "pages": pages,
+    }
+
+
+# ---------- Complaint Timeline (no JWT) ----------
+@app.get("/complaints/{id}/timeline")
+def get_complaint_timeline(id: int, db: Session = Depends(get_db)):
+    """Return the status timeline for a complaint."""
+    complaint = db.query(Complaint).filter(Complaint.id == id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    entries = (
+        db.query(ComplaintTimeline)
+        .filter(ComplaintTimeline.complaint_id == id)
+        .order_by(ComplaintTimeline.created_at.asc())
+        .all()
+    )
+    return {
+        "complaint_id": id,
+        "current_status": complaint.status,
+        "timeline": [
+            {
+                "status": e.status,
+                "note": e.note,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in entries
+        ],
+    }
+
 
 # ====================== RUN ======================
 if __name__ == "__main__":

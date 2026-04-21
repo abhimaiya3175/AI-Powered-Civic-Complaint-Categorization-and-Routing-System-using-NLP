@@ -53,7 +53,6 @@ complaints.db-journal
 *.jpeg
 *.png
 response_submit.json
-outputs/
 
 # ── OS / IDE ───────────────────────────────
 .DS_Store
@@ -69,8 +68,5 @@ Thumbs.db
 # ── Docker ─────────────────────────────────
 docker-compose.override.yml
 
-# ── Local Copilot Instructions ─────────────
-.github/instructions/location-authenticity.instructions.md
-
-# ── Datasets ─────────────────────────────
-Kannadadata/SPRINGLab___indic_tts_kannada
+# ── Datasets ───────────────────────────────
+Kannadadata/

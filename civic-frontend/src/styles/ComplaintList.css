@@ -494,3 +494,157 @@
     flex-wrap: wrap;
   }
 }
+
+/* ── Extended Status Badges ─────────────────────────────────────── */
+.badge-pending  { background: #FEE2E2; color: #DC2626 !important; }
+.badge-verified { background: #FEF9C3; color: #D97706 !important; }
+.badge-inprogress { background: #DBEAFE; color: #2563EB !important; padding: 0.2rem 0.6rem; border-radius: var(--radius-full); font-size: 0.75rem; font-weight: 600; }
+.badge-resolved { background: #DCFCE7; color: #16A34A !important; padding: 0.2rem 0.6rem; border-radius: var(--radius-full); font-size: 0.75rem; font-weight: 600; }
+
+/* ── Card glow states ───────────────────────────────────────────── */
+.complaint-card.resolved-glow {
+  box-shadow: 0 0 10px rgba(22, 163, 74, 0.12);
+  border-color: rgba(22, 163, 74, 0.25);
+}
+.complaint-card.inprogress-glow {
+  box-shadow: 0 0 10px rgba(37, 99, 235, 0.1);
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+/* ── Priority Badge ─────────────────────────────────────────────── */
+.badge-priority {
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #FEF3C7, #FDE68A);
+  color: #92400E;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+  border: 1px solid #FCD34D;
+  white-space: nowrap;
+}
+
+/* ── Vote Count Badge (admin read-only) ─────────────────────────── */
+.vote-count-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+}
+
+/* ── Filter right controls ──────────────────────────────────────── */
+.filter-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.admin-filter-select {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  padding: 0.4375rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-body);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.admin-filter-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* ── Admin Note Textarea ────────────────────────────────────────── */
+.admin-note-block {
+  margin-top: 0.25rem;
+}
+.admin-note-input {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.7);
+  color: var(--color-text-body);
+  resize: vertical;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+.admin-note-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* ── In Progress / Resolved action buttons ──────────────────────── */
+.btn-info {
+  background: linear-gradient(135deg, #2563EB, #3B82F6);
+  color: #fff;
+  border: none;
+}
+.btn-info:hover {
+  background: linear-gradient(135deg, #1D4ED8, #2563EB);
+}
+.btn-resolved {
+  background: linear-gradient(135deg, #16A34A, #22C55E);
+  color: #fff;
+  border: none;
+}
+.btn-resolved:hover {
+  background: linear-gradient(135deg, #15803D, #16A34A);
+}
+
+/* ── Admin Timeline Panel ───────────────────────────────────────── */
+.admin-timeline-panel {
+  padding: 0.875rem;
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  animation: fadeInUp 0.2s ease-out;
+}
+
+.admin-timeline {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem; /* for scrollbar spacing if needed */
+}
+
+.admin-tl-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  background: rgba(255,255,255,0.8);
+  border-radius: var(--radius-md);
+  border-top: 3px solid var(--color-primary);
+  border-left: none;
+  min-width: 140px;
+  flex: 1;
+}
+
+.admin-tl-status {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  min-width: 100px;
+}
+
+.admin-tl-time {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.admin-tl-note {
+  font-size: 0.775rem;
+  color: var(--color-text-body);
+  font-style: italic;
+  flex: 1;
+}
+
