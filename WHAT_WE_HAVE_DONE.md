@@ -133,3 +133,20 @@ venv\Scripts\python -m pytest tests/test_image_detection.py
 2. **ML Model Classification Edge Case**:
    - The phrase *"Garbage collection has not happened for five days in our area. Waste is piled up..."* is currently misclassified by the TF-IDF + Naive Bayes model as `"Others"` instead of `"Garbage / Sanitation"`.
    - Action item: Gather more misclassified samples to determine if this requires tuning `ZERO_SHOT_MIN_CONFIDENCE` or if it represents an actual data distribution gap requiring model retraining.
+
+### Session 4: Bug Fixes & Edge Case Resilience (July 1)
+1. **Florence-2 Inference Reliability**: 
+   - Fixed Florence-2 crashing due to float16/float32 tensor mismatches.
+   - Fixed Florence-2 model timing out on CPUs by increasing the `asyncio` wait time from 30 seconds to 120 seconds.
+   - **Improved Visual Categorization**: Florence-2 object detection wasn't capturing nuanced context (like detecting a "car" near a "pothole"). Updated `_match_visual_category` to scan the generated image *caption* along with the object detections. This allows the system to easily map "pothole" to "Road Repair".
+
+2. **Semantic Fallback Sensitivity Tuning**:
+   - For poorly-translated edge cases (e.g. NLLB translating Kannada complaints), the primary TF-IDF model would confidently guess "Others".
+   - The Zero-shot DistilBART model would accurately guess the true category (e.g., "Town Planning") but with a low confidence (~0.30 - 0.35).
+   - Fixed this by lowering the `ZERO_SHOT_SPARSE_MIN_SCORE` threshold from `0.40` to `0.25` *only* when the primary model guesses "Others". This successfully catches all translated edge cases.
+
+3. **EXIF GPS Validation Override**:
+   - Disabled strict EXIF enforcement (400 Bad Request) for images lacking GPS metadata. The system now gracefully accepts the image and defaults the complaint to manual review, dramatically reducing user friction.
+
+4. **Test Suite Stabilization**:
+   - Resolved `ReadTimeoutError` during `tests/test_ml_model_and_languages.py` execution by increasing the API health-check (`/model/status`) timeout from 10s to 120s to allow multiple massive transformer models to load into the CPU gracefully on cold start.

@@ -33,7 +33,8 @@ import speech_recognition as sr
 from pydub import AudioSegment
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 from nlp_features import build_multilingual_classification_text
-from image_features import analyze_image, load_yolo_model, DETECTION_CLASS_TO_CATEGORY
+from image_features import analyze_image, load_yolo_model, DETECTION_CLASS_TO_CATEGORY, IMAGE_BACKEND
+from cross_modal import verify_cross_modal
 
 try:
     from IndicTransToolkit import IndicProcessor  # type: ignore
@@ -235,12 +236,25 @@ class Complaint(Base):
     status = Column(String, default="pending")
     votes = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
-    # Image detection (YOLOv8n-seg pothole/road-damage detection)
+    # Image detection (YOLOv8n-seg pothole/road-damage detection — backward compat)
     detected_objects = Column(Text)         # JSON: [{class, confidence, bbox, severity}]
     annotated_image_path = Column(String)   # Path to annotated image (nullable)
     pothole_severity = Column(String)       # Overall severity: Clear/Low/Medium/High/Severe (nullable)
     image_suggested_category = Column(String)  # Category suggested by image analysis, nullable
     category_mismatch = Column(Boolean, default=False)  # True if image analysis strongly disagrees with NLP
+    # Florence-2 Image Analysis
+    florence_status = Column(String, default=None)          # processing|success|unavailable|timeout|error|None
+    florence_caption = Column(Text)                         # Short image caption
+    florence_damaged_object = Column(String)                # Top detected object from <OD>
+    florence_problem_type = Column(String)                  # Matched problem type keyword
+    florence_severity = Column(String)                      # Keyword-based severity from caption
+    florence_evidence = Column(Text)                        # Raw <MORE_DETAILED_CAPTION> text
+    florence_processing_time = Column(Float)                # Seconds
+    # Cross-Modal Verification
+    cross_modal_result = Column(String)                    # match|mismatch|image_unclear|None
+    cross_modal_nlp_category = Column(String)              # NLP side
+    cross_modal_image_category = Column(String)            # Image side
+    manual_review_required = Column(Boolean, default=False)
 
 class ComplaintVote(Base):
     __tablename__ = "complaint_votes"
@@ -350,6 +364,19 @@ def ensure_complaints_schema_upgrades():
         "pothole_severity": "VARCHAR",
         "image_suggested_category": "VARCHAR",
         "category_mismatch": "BOOLEAN DEFAULT FALSE",
+        # Florence-2 Image Analysis
+        "florence_status": "VARCHAR",
+        "florence_caption": "TEXT",
+        "florence_damaged_object": "VARCHAR",
+        "florence_problem_type": "VARCHAR",
+        "florence_severity": "VARCHAR",
+        "florence_evidence": "TEXT",
+        "florence_processing_time": "FLOAT",
+        # Cross-Modal Verification
+        "cross_modal_result": "VARCHAR",
+        "cross_modal_nlp_category": "VARCHAR",
+        "cross_modal_image_category": "VARCHAR",
+        "manual_review_required": "BOOLEAN DEFAULT FALSE",
     })
 
 
@@ -540,8 +567,11 @@ logger.info("Loading Whisper small …")
 whisper_model = whisper.load_model("small")
 logger.info("Core NLP models loaded successfully")
 
-logger.info("Loading YOLOv8n-seg pothole detection model …")
-load_yolo_model()
+if IMAGE_BACKEND == "yolo":
+    logger.info("Loading YOLOv8n-seg pothole detection model …")
+    load_yolo_model()
+else:
+    logger.info("Florence-2 image analysis configured (lazy-load on first request)")
 
 # ====================== FASTAPI APP ======================
 app = FastAPI(title="Multilingual Civic Complaint System (BBMP)")
@@ -715,6 +745,21 @@ def explain_category_prediction(text: str, text_vector, predicted_label: str, to
                     "weight_delta": weight_delta,
                 }
             )
+
+        if not scored_terms:
+            # Fallback: Just use top TF-IDF features if weight_delta didn't yield anything
+            for feature_idx, tfidf_value in zip(row.indices, row.data):
+                term = str(feature_names[feature_idx]).strip()
+                if not term or term.startswith("char_wb__"):
+                    continue
+                if term.startswith("word__"):
+                    term = term.replace("word__", "", 1)
+                scored_terms.append({
+                    "term": term,
+                    "contribution": float(tfidf_value),
+                    "tfidf": float(tfidf_value),
+                    "weight_delta": 0.0,
+                })
 
         if not scored_terms:
             return explanation
@@ -1158,7 +1203,8 @@ async def preload_translation_models() -> None:
         app.state.indic_processor = processor
         app.state.translation_backend = "indictrans2"
         if IndicProcessor is None:
-            logger.warning("IndicTransToolkit not installed; using fallback processor for IndicTrans2 preprocessing.")
+            logger.warning("IndicTransToolkit not installed; forcing fallback to NLLB model.")
+            raise RuntimeError("IndicTransToolkit is required for IndicTrans2 to work correctly.")
         logger.info("IndicTrans2 + IndicProcessor loaded successfully (backend=indictrans2).")
         return
     except Exception as primary_exc:
@@ -1233,6 +1279,69 @@ def register_admin(admin: AdminCreate, db: Session = Depends(get_db)):
     logger.info("Registered new admin: '%s'", admin.username)
     return {"msg": "Admin created successfully"}
 
+async def _run_image_analysis_background(complaint_id: int, image_path: str, nlp_category: str):
+    """Background task to run Florence-2 (or YOLOv8) and perform cross-modal verification."""
+    from main import SessionLocal
+    db = SessionLocal()
+    try:
+        # 120 second timeout for image analysis (protects against Florence-2 hanging but gives CPU enough time)
+        result = await asyncio.wait_for(analyze_image(image_path), timeout=120.0)
+        
+        # Cross-modal verification
+        # For old complaints, we would need to pass existing trust level if we were preserving it,
+        # but here we can just use "medium" as the default fallback for image_unclear
+        verification = verify_cross_modal(nlp_category, result, existing_trust_level="medium")
+        
+        complaint = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+        if not complaint:
+            return
+            
+        complaint.florence_status = result.get("status", "error")
+        if result.get("backend") == "florence":
+            complaint.florence_caption = result.get("caption")
+            complaint.florence_damaged_object = result.get("damaged_object")
+            complaint.florence_problem_type = result.get("problem_type")
+            complaint.florence_severity = result.get("severity")
+            complaint.florence_evidence = result.get("supporting_evidence")
+            complaint.florence_processing_time = result.get("processing_time")
+        else:
+            # Backward compat for YOLOv8
+            complaint.detected_objects = json.dumps(result.get("detections", []))
+            complaint.pothole_severity = result.get("severity")
+            
+        complaint.image_suggested_category = result.get("suggested_category")
+        
+        # Verification results
+        complaint.cross_modal_result = verification.get("verification_result")
+        complaint.cross_modal_nlp_category = verification.get("nlp_category")
+        complaint.cross_modal_image_category = verification.get("image_category")
+        complaint.manual_review_required = verification.get("manual_review_required", False)
+        
+        # Update trust level if verification changed it
+        if verification.get("verification_result") != "image_unclear":
+            complaint.trust_level = verification.get("trust_level", "medium")
+            if verification.get("trust_level") == "manual_review":
+                complaint.status = "pending"
+                complaint.category_mismatch = True # backward compat
+        
+        db.commit()
+        logger.info(f"Background image analysis completed for complaint {complaint_id}")
+    except asyncio.TimeoutError:
+        logger.error(f"Background image analysis timed out for complaint {complaint_id}")
+        complaint = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+        if complaint:
+            complaint.florence_status = "timeout"
+            db.commit()
+    except Exception as exc:
+        logger.error(f"Background image analysis failed for complaint {complaint_id}: {exc}")
+        complaint = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+        if complaint:
+            complaint.florence_status = "error"
+            db.commit()
+    finally:
+        db.close()
+
+
 # ---------- Submit Complaint ----------
 @app.post("/submit-complaint")
 async def submit_complaint(
@@ -1287,8 +1396,8 @@ async def submit_complaint(
     recording_language = normalize_language_code(language, "language")
     target_language_code = normalize_language_code(target_language, "target_language")
 
-    if file is None and not submitted_text:
-        raise HTTPException(status_code=400, detail="Provide either audio or complaint text along with live location.")
+    if file is None and not submitted_text and image is None:
+        raise HTTPException(status_code=400, detail="Provide either audio, complaint text, or an image along with live location.")
 
     if file is not None:
         validate_audio_file(file)
@@ -1337,6 +1446,19 @@ async def submit_complaint(
     # ── Stage 1: Transcription (timed) ────────────────────────────
     transcribed_text = submitted_text
     detected_language = recording_language
+    
+    if submitted_text and not audio_path:
+        try:
+            import langid
+            guessed_lang, _ = langid.classify(submitted_text)
+            if guessed_lang in SUPPORTED_LANGUAGES:
+                detected_language = guessed_lang
+                logger.info(f"Auto-detected text language as '{guessed_lang}' (UI passed '{recording_language}')")
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"langid failed: {e}")
+
     _t_transcription_start = time.perf_counter()
     if audio_path:
         if recording_language in ["kn", "hi", "en"]:
@@ -1457,8 +1579,8 @@ async def submit_complaint(
                 raise HTTPException(status_code=500, detail="Audio transcription failed. Please try again.")
     _nlp_transcription_time = time.perf_counter() - _t_transcription_start
 
-    if not transcribed_text:
-        raise HTTPException(status_code=400, detail="Complaint text is required.")
+    if not transcribed_text and not image_path:
+        raise HTTPException(status_code=400, detail="Complaint text or image is required.")
 
     # ── Stage 2: Translation (timed) ──────────────────────────────
     _t_translation_start = time.perf_counter()
@@ -1526,6 +1648,7 @@ async def submit_complaint(
         generic_primary_signal = bool(top_terms) and all(
             term in GENERIC_PRIMARY_FEATURE_TERMS for term in top_terms
         )
+        
     except Exception as e:
         _nlp_error_stage = _nlp_error_stage or "classification"
         _nlp_error_message = _nlp_error_message or str(e)
@@ -1541,11 +1664,15 @@ async def submit_complaint(
     _t_zero_shot_start = time.perf_counter()
     if (
         ENABLE_ZERO_SHOT_FALLBACK
-        and (low_primary_confidence or sparse_primary_signal or generic_primary_signal)
+        and english_text_for_classification.strip()
+        and (low_primary_confidence or sparse_primary_signal or generic_primary_signal or category == "Others")
     ):
         _nlp_zero_shot_triggered = True
         try:
-            candidate_categories = MODEL_RUNTIME_INFO.get("classes", [])
+            candidate_categories = [
+                c for c in MODEL_RUNTIME_INFO.get("classes", [])
+                if c not in ("Non-Civic",)
+            ]
             semantic_category, semantic_score = await asyncio.to_thread(
                 _predict_zero_shot_category_sync,
                 english_text_for_classification,
@@ -1554,7 +1681,8 @@ async def submit_complaint(
             _nlp_zero_shot_confidence = float(semantic_score) if semantic_score else 0.0
 
             semantic_threshold = (
-                ZERO_SHOT_MIN_SCORE if low_primary_confidence else ZERO_SHOT_SPARSE_MIN_SCORE
+                0.25 if category == "Others" else
+                (ZERO_SHOT_MIN_SCORE if low_primary_confidence else ZERO_SHOT_SPARSE_MIN_SCORE)
             )
 
             if semantic_category and semantic_score >= semantic_threshold and semantic_category != category:
@@ -1638,63 +1766,39 @@ async def submit_complaint(
     status = "pending"
 
     if image_path:
-        image_exif_latitude, image_exif_longitude, image_exif_timestamp = extract_exif_location_and_time(image_path)
-        image_live_distance_meters = haversine_distance_meters(
-            live_latitude,
-            live_longitude,
-            image_exif_latitude,
-            image_exif_longitude,
-        )
-        if image_live_distance_meters > GPS_TOLERANCE_METERS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Image GPS does not match live location within {int(GPS_TOLERANCE_METERS)} meters."
+        try:
+            image_exif_latitude, image_exif_longitude, image_exif_timestamp = extract_exif_location_and_time(image_path)
+            image_live_distance_meters = haversine_distance_meters(
+                live_latitude,
+                live_longitude,
+                image_exif_latitude,
+                image_exif_longitude,
             )
+            if image_live_distance_meters <= GPS_TOLERANCE_METERS:
+                image_age_seconds = (datetime.utcnow() - image_exif_timestamp).total_seconds()
+                if image_age_seconds <= MAX_IMAGE_AGE_SECONDS:
+                    trust_level = "high"
+                    verification_mode = "auto_verified"
+                    status = "Verified"
+                else:
+                    logger.info("Image EXIF timestamp is older than %d seconds, skipping auto-verify", MAX_IMAGE_AGE_SECONDS)
+            else:
+                logger.info("Image GPS distance %.1fm exceeds tolerance, skipping auto-verify", image_live_distance_meters)
+        except HTTPException:
+            # EXIF data missing or malformed — accept the image anyway, just don't auto-verify
+            logger.info("Image has no valid EXIF/GPS data — accepting without auto-verification")
+        except Exception as exc:
+            logger.warning("EXIF extraction failed: %s — accepting image without auto-verification", exc)
 
-        image_age_seconds = (datetime.utcnow() - image_exif_timestamp).total_seconds()
-        if image_age_seconds > MAX_IMAGE_AGE_SECONDS:
-            raise HTTPException(
-                status_code=400,
-                detail="Image metadata timestamp is older than 10 minutes. Capture a fresh photo."
-            )
-
-        trust_level = "high"
-        verification_mode = "auto_verified"
-        status = "Verified"
-
-    # ── Stage 6: Image analysis — pothole/road-damage detection (timed) ──
+    # ── Stage 6: Image analysis — background processing ──
     _t_image_analysis_start = time.perf_counter()
     image_suggested_category = None
     category_mismatch = False
-
-    if image_path:
-        try:
-            img_result = await analyze_image(image_path)
-            detections = img_result.get("detections", [])
-            _nlp_detected_objects = detections
-            _nlp_detected_object_count = len(detections)
-            _nlp_pothole_severity = img_result.get("severity")  # "Clear", "Low", ..., "Severe", or None
-            if detections:
-                _nlp_image_model_confidence = max(d["confidence"] for d in detections)
-                
-                # Reconciliation logic
-                top_detection = max(detections, key=lambda d: d["confidence"])
-                image_suggested_category = DETECTION_CLASS_TO_CATEGORY.get(top_detection["class"])
-                
-                if (
-                    image_suggested_category is not None 
-                    and image_suggested_category != category 
-                    and top_detection["confidence"] > IMAGE_RECONCILE_CONFIDENCE_THRESHOLD
-                ):
-                    category_mismatch = True
-                    # Downgrade trust level so admin has to review the mismatch
-                    trust_level = "manual_review"
-                    status = "pending"
-
-        except Exception as img_exc:
-            _nlp_error_stage = _nlp_error_stage or "image_analysis"
-            _nlp_error_message = _nlp_error_message or str(img_exc)
-            logger.warning("Image analysis failed (non-fatal): %s", img_exc)
+    
+    # We no longer block on image analysis. We set florence_status to processing and let
+    # the background task update the record later.
+    florence_status = "processing" if image_path else None
+    
     _nlp_image_analysis_time = time.perf_counter() - _t_image_analysis_start
 
     DUPLICATE_RADIUS_KM = 0.5
@@ -1838,10 +1942,15 @@ async def submit_complaint(
         pothole_severity=_nlp_pothole_severity,
         image_suggested_category=image_suggested_category,
         category_mismatch=category_mismatch,
+        florence_status=florence_status,
     )
     db.add(complaint)
     db.commit()
     db.refresh(complaint)
+    
+    # Spawn background task for image analysis
+    if image_path:
+        asyncio.create_task(_run_image_analysis_background(complaint.id, image_path, category))
 
     # Record the submitter's fingerprint as the first vote on the new complaint
     if fp:
@@ -1911,6 +2020,22 @@ async def submit_complaint(
         "pothole_severity": _nlp_pothole_severity,
         "image_suggested_category": complaint.image_suggested_category,
         "category_mismatch": complaint.category_mismatch,
+        "florence_analysis": {
+            "status": complaint.florence_status,
+            "caption": complaint.florence_caption,
+            "damaged_object": complaint.florence_damaged_object,
+            "problem_type": complaint.florence_problem_type,
+            "severity": complaint.florence_severity,
+            "supporting_evidence": complaint.florence_evidence,
+            "processing_time": complaint.florence_processing_time,
+        },
+        "cross_modal": {
+            "nlp_category": complaint.cross_modal_nlp_category or complaint.category,
+            "image_category": complaint.cross_modal_image_category,
+            "verification_result": complaint.cross_modal_result,
+            "trust_level": complaint.trust_level,
+            "manual_review_required": complaint.manual_review_required,
+        }
     }
 
 # ---------- Audio File Serving ----------
@@ -2332,6 +2457,31 @@ async def analytics_dashboard(
     }
 
 
+# ---------- Admin: Re-analyze Image ----------
+@app.post("/complaints/{id}/reanalyze")
+async def reanalyze_complaint_image(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user)
+):
+    """Admin action: re-run Florence-2 on an existing complaint's image."""
+    complaint = db.query(Complaint).filter(Complaint.id == id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+        
+    if not complaint.image_path:
+        raise HTTPException(status_code=400, detail="Complaint has no image")
+
+    # Set processing status
+    complaint.florence_status = "processing"
+    db.commit()
+
+    # Spawn background task
+    asyncio.create_task(_run_image_analysis_background(complaint.id, complaint.image_path, complaint.category))
+
+    logger.info("Admin %s triggered image re-analysis for complaint %d", current_user, id)
+    return {"msg": "Image re-analysis started in the background", "status": "processing"}
+
 # ---------- List Complaints (Paginated, JWT-protected) ----------
 @app.get("/complaints")
 async def get_complaints(
@@ -2355,8 +2505,34 @@ async def get_complaints(
     ).offset(offset).limit(size).all()
 
     logger.info(f"GET /complaints page={page} size={size} total={total} mismatch={category_mismatch}")
+    
+    # Format items to include structured Florence-2 and cross-modal dicts
+    formatted_items = []
+    for c in items:
+        # Convert SQLAlchemy object to dictionary
+        c_dict = {column.name: getattr(c, column.name) for column in c.__table__.columns}
+        
+        # Add the nested dicts expected by the frontend
+        c_dict["florence_analysis"] = {
+            "status": c.florence_status,
+            "caption": c.florence_caption,
+            "damaged_object": c.florence_damaged_object,
+            "problem_type": c.florence_problem_type,
+            "severity": c.florence_severity,
+            "supporting_evidence": c.florence_evidence,
+            "processing_time": c.florence_processing_time,
+        }
+        c_dict["cross_modal"] = {
+            "nlp_category": c.cross_modal_nlp_category or c.category,
+            "image_category": c.cross_modal_image_category,
+            "verification_result": c.cross_modal_result,
+            "trust_level": c.trust_level,
+            "manual_review_required": c.manual_review_required,
+        }
+        formatted_items.append(c_dict)
+    
     return {
-        "items": items,
+        "items": formatted_items,
         "total": total,
         "page": page,
         "size": size,
