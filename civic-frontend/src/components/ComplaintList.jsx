@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
-import { getComplaints, verifyComplaint, getStats, loginAdmin, getAudioUrl, getComplaintTimeline } from '../services/api';
+import { getComplaints, verifyComplaint, getStats, loginAdmin, getAudioUrl, getComplaintTimeline, reanalyzeImage } from '../services/api';
 import { MapContainer, TileLayer, Popup, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import '../styles/ComplaintList.css';
@@ -183,6 +183,9 @@ export default function ComplaintList() {
   const [tlLoading, setTlLoading] = useState({});
   const [tlOpen, setTlOpen] = useState({});
   const [mismatchFilter, setMismatchFilter] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState({});
+  
+  const toggleAiPanel = (id) => setAiPanelOpen(p => ({ ...p, [id]: !p[id] }));
 
   useEffect(() => { audioSourcesRef.current = audioSources; }, [audioSources]);
 
@@ -255,6 +258,16 @@ export default function ComplaintList() {
     } catch (e) {
       if (isAuthError(e)) handleLogout();
       else alert(e.message || 'Failed to update category');
+    }
+  };
+  const handleReanalyze = async (id) => {
+    try {
+      await reanalyzeImage(id, token);
+      alert('Image re-analysis started in the background. It will update in a few seconds.');
+      fetchComplaints();
+    } catch (e) {
+      if (isAuthError(e)) handleLogout();
+      else alert(e.message || 'Failed to start re-analysis');
     }
   };
 
@@ -550,13 +563,70 @@ export default function ComplaintList() {
                   </div>
 
                   {c.image_path && (
-                    <div className="ccard-image">
-                      <span className="ccard-field-label">Image Evidence</span>
-                      <DetectionOverlay 
-                        imageUrl={getAudioUrl(c.image_path, token)} 
-                        alt={`Evidence #${c.id}`}
-                        detections={c.detected_objects ? JSON.parse(c.detected_objects) : null}
-                      />
+                    <div className="ccard-ai-section">
+                      <div className="ai-panel-header" onClick={() => toggleAiPanel(c.id)}>
+                        <span className="ai-panel-title">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+                          AI Analysis {aiPanelOpen[c.id] ? '▼' : '▶'}
+                        </span>
+                        <div className="ai-panel-badges">
+                          {c.florence_analysis?.status === 'processing' && <span className="badge-info">⏳ Processing Image...</span>}
+                          {c.cross_modal?.verification_result === 'mismatch' && <span className="badge-warning">⚠️ Cross-Modal Mismatch</span>}
+                          {c.cross_modal?.verification_result === 'match' && <span className="badge-success">✓ Verified Match</span>}
+                          {c.cross_modal?.verification_result === 'image_unclear' && <span className="badge-neutral">ℹ️ Image Unclear</span>}
+                        </div>
+                      </div>
+
+                      {aiPanelOpen[c.id] && (
+                        <div className="ai-panel-content">
+                          <div className="ai-split-view">
+                            <div className="ai-image-col">
+                              <DetectionOverlay 
+                                imageUrl={getAudioUrl(c.image_path, token)} 
+                                alt={`Evidence #${c.id}`}
+                                detections={c.detected_objects ? JSON.parse(c.detected_objects) : null}
+                              />
+                            </div>
+                            <div className="ai-data-col">
+                              <div className="ai-data-group">
+                                <h4>Florence-2 Visual Understanding</h4>
+                                {c.florence_analysis?.status === 'processing' ? (
+                                  <p className="text-muted">Analysis running in background...</p>
+                                ) : c.florence_analysis?.status === 'success' ? (
+                                  <>
+                                    <p><strong>Caption:</strong> {c.florence_analysis.caption}</p>
+                                    <p><strong>Detected Object:</strong> {c.florence_analysis.damaged_object || 'None'}</p>
+                                    <p><strong>Problem Type:</strong> {c.florence_analysis.problem_type || 'None'}</p>
+                                    <p><strong>Severity:</strong> <span className={`severity-badge severity-${c.florence_analysis.severity?.toLowerCase()}`}>{c.florence_analysis.severity}</span></p>
+                                    <p><strong>Evidence Text:</strong> <em>{c.florence_analysis.supporting_evidence}</em></p>
+                                    <p className="text-muted text-xs">Processed in {c.florence_analysis.processing_time}s</p>
+                                  </>
+                                ) : c.florence_analysis?.status === 'error' || c.florence_analysis?.status === 'timeout' ? (
+                                  <>
+                                    <p className="text-danger">Analysis failed ({c.florence_analysis.status})</p>
+                                    <button className="btn btn-secondary btn-sm mt-2" onClick={() => handleReanalyze(c.id)}>
+                                      ↻ Retry Analysis
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <p className="text-muted">No Florence-2 data available.</p>
+                                    <button className="btn btn-secondary btn-sm mt-2" onClick={() => handleReanalyze(c.id)}>
+                                      ↻ Run Florence-2
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                              <div className="ai-data-group">
+                                <h4>Cross-Modal Verification</h4>
+                                <p><strong>NLP Category:</strong> {c.cross_modal?.nlp_category}</p>
+                                <p><strong>Image Category:</strong> {c.cross_modal?.image_category || 'None'}</p>
+                                <p><strong>System Trust Level:</strong> <span className={`trust-badge trust-${c.cross_modal?.trust_level?.replace('_', '-')}`}>{c.cross_modal?.trust_level}</span></p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 

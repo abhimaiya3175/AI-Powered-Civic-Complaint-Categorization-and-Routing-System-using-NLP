@@ -635,44 +635,49 @@ export default function RecordComplaint() {
               <span className="result-value">{getLanguageLabel(result.target_language)}</span>
             </div>
           </div>
-
-          {result.transcribed_text && (
-            <div className="result-transcript">
-              <span className="result-label">Original Transcribed Text</span>
-              <p className="transcript-text">{result.transcribed_text}</p>
-            </div>
-          )}
-
-          {result.translated_text && (
-            <div className="result-transcript">
-              <span className="result-label">Translated Text</span>
-              <p className="transcript-text">{result.translated_text}</p>
-            </div>
-          )}
-
-          {result.category_explanation && (
-            <div className="result-transcript explanation-card">
-              <span className="result-label">Why This Category (NLP Evidence)</span>
-              <p className="explanation-meta">
-                TF-IDF + Naive Bayes model · Confidence: {formatConfidence(result.category_explanation?.confidence)}
-              </p>
-              <p className="transcript-text">
-                {renderHighlightedText(
-                  result.classification_text || result.translated_text || result.transcribed_text || '',
-                  result.category_explanation?.highlight_terms || []
+          <div className="pipeline-steps-container" style={{ marginTop: '20px' }}>
+            <h4 style={{ color: 'var(--primary-color)', marginBottom: '15px', borderBottom: '1px solid #ddd', paddingBottom: '10px' }}>
+              NLP Processing Pipeline
+            </h4>
+            
+            {result.transcribed_text && (
+              <div className="result-transcript" style={{ borderLeft: '4px solid var(--primary-color)', paddingLeft: '15px', marginBottom: '15px' }}>
+                <span className="result-label">Step 1: Original Input ({getLanguageLabel(result.detected_language)})</span>
+                <p className="transcript-text">{result.transcribed_text}</p>
+              </div>
+            )}
+  
+            {result.translated_text && result.translated_text !== result.transcribed_text && (
+              <div className="result-transcript" style={{ borderLeft: '4px solid var(--primary-color)', paddingLeft: '15px', marginBottom: '15px' }}>
+                <span className="result-label">Step 2: English Translation</span>
+                <p className="transcript-text">{result.translated_text}</p>
+              </div>
+            )}
+  
+            {result.category_explanation && (
+              <div className="result-transcript explanation-card" style={{ borderLeft: '4px solid var(--primary-color)', paddingLeft: '15px' }}>
+                <span className="result-label">Step 3: ML Prediction ({result.category_explanation?.method === 'zero_shot_nli_fallback' ? 'Semantic NLI Zero-Shot' : 'TF-IDF + Naive Bayes'})</span>
+                <p className="explanation-meta">
+                  Confidence: {formatConfidence(result.category_explanation?.confidence)}
+                </p>
+                <p className="transcript-text">
+                  {renderHighlightedText(
+                    result.classification_text || result.translated_text || result.transcribed_text || '',
+                    result.category_explanation?.highlight_terms || []
+                  )}
+                </p>
+                {Array.isArray(result.category_explanation?.top_features) && result.category_explanation.top_features.length > 0 && (
+                  <div className="reason-tags" aria-label="Top words influencing category prediction">
+                    {result.category_explanation.top_features.map((feature, index) => (
+                      <span key={`${feature.term}-${index}`} className="reason-tag">
+                        {feature.term} ({feature.importance_percent}%)
+                      </span>
+                    ))}
+                  </div>
                 )}
-              </p>
-              {Array.isArray(result.category_explanation?.top_features) && result.category_explanation.top_features.length > 0 && (
-                <div className="reason-tags" aria-label="Top words influencing category prediction">
-                  {result.category_explanation.top_features.map((feature, index) => (
-                    <span key={`${feature.term}-${index}`} className="reason-tag">
-                      {feature.term} ({feature.importance_percent}%)
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
           <div className="success-actions">
             <button className="btn btn-secondary" onClick={reset}>Submit Another</button>

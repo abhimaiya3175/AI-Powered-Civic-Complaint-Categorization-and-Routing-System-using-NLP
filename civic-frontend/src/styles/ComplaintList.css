@@ -611,3 +611,125 @@
   .ccard-footer { gap: 0.3rem; }
   .ccard-footer .btn { font-size: 0.72rem; padding: 0.3rem 0.6rem; }
 }
+
+/* ── AI Analysis Panel ───────────────────────────────────────── */
+.ccard-ai-section {
+  border-top: 1px solid var(--border);
+  background: rgba(147, 51, 234, 0.02);
+}
+
+.ai-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ai-panel-header:hover {
+  background: rgba(147, 51, 234, 0.05);
+}
+
+.ai-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.ai-panel-badges {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ai-panel-content {
+  padding: 1rem;
+  border-top: 1px dashed var(--border);
+}
+
+.ai-split-view {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .ai-split-view {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ai-image-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-data-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.ai-data-group h4 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: var(--text-light);
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.25rem;
+}
+
+.ai-data-group p {
+  margin: 0.25rem 0;
+  line-height: 1.4;
+}
+
+.ai-data-group strong {
+  font-weight: 600;
+  color: var(--text);
+  margin-right: 0.25rem;
+}
+
+.text-muted {
+  color: var(--text-light);
+}
+
+.text-danger {
+  color: var(--danger);
+}
+
+.text-xs {
+  font-size: 0.75rem;
+}
+
+.mt-2 {
+  margin-top: 0.5rem;
+}
+
+.trust-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.trust-high {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.trust-medium {
+  background: rgba(234, 179, 8, 0.1);
+  color: #ca8a04;
+}
+
+.trust-manual-review {
+  background: var(--danger-bg);
+  color: var(--danger);
+}

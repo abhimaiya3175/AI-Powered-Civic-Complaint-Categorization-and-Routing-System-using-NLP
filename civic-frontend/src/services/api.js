@@ -148,6 +148,26 @@ export const loginAdmin = async (username, password) => {
 };
 
 /**
+ * Re-analyze an image using Florence-2.
+ */
+export const reanalyzeImage = async (id, token) => {
+  const response = await fetch(`${API_BASE}/complaints/${id}/reanalyze`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || 'Re-analysis failed');
+  }
+
+  return response.json();
+};
+
+
+/**
  * Build the full URL for an audio file so <audio> can play it.
  */
 export const getAudioUrl = (audioPath, token) => {

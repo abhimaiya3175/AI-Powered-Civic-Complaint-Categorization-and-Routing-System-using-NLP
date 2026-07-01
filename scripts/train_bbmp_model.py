@@ -93,7 +93,7 @@ english_augmentation_rows = [
     # Non-Civic irrelevant inputs
     {"Sub Category": "i played a game yesterday with my friends", "Category": "Non-Civic", "target": "Non-Civic"},
     {"Sub Category": "hello how are you doing today", "Category": "Non-Civic", "target": "Non-Civic"},
-    {"Sub Category": "what is the weather like in bangalore", "Category": "Non-Civic", "target": "Non-Civic"},
+    {"Sub Category": "what time is it in london right now", "Category": "Non-Civic", "target": "Non-Civic"},
     {"Sub Category": "i want to order food from swiggy", "Category": "Non-Civic", "target": "Non-Civic"},
     {"Sub Category": "this is a test audio recording testing 1 2 3", "Category": "Non-Civic", "target": "Non-Civic"},
     {"Sub Category": "i went to the mall to buy clothes", "Category": "Non-Civic", "target": "Non-Civic"},

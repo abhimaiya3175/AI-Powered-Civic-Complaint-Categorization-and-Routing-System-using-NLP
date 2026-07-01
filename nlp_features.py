@@ -26,4 +26,4 @@ def build_multilingual_classification_text(
     if original.casefold() == translated.casefold():
         return translated
 
-    return f"{translated} {original}"
+    return translated
