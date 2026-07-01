@@ -274,8 +274,7 @@ export default function RecordComplaint() {
   };
 
   const isWithinBangalore = (lat, lng) => {
-    return lat >= BANGALORE_BOUNDS.minLat && lat <= BANGALORE_BOUNDS.maxLat &&
-           lng >= BANGALORE_BOUNDS.minLng && lng <= BANGALORE_BOUNDS.maxLng;
+    return true; // Disabled to allow outside Bangalore also
   };
 
   const ensureLiveLocation = async ({ forceFresh = false } = {}) => {

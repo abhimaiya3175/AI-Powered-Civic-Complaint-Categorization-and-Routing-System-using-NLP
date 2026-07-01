@@ -1277,9 +1277,9 @@ async def submit_complaint(
     if not (-90 <= live_latitude <= 90) or not (-180 <= live_longitude <= 180):
         raise HTTPException(status_code=400, detail="Live location coordinates are invalid.")
 
-    # Restrict to Bangalore limits
-    if not (12.73 <= live_latitude <= 13.14) or not (77.37 <= live_longitude <= 77.88):
-        raise HTTPException(status_code=400, detail="Complaints can only be reported within Bangalore city limits.")
+    # Restrict to Bangalore limits (Disabled to allow outside Bangalore also)
+    # if not (12.73 <= live_latitude <= 13.14) or not (77.37 <= live_longitude <= 77.88):
+    #     raise HTTPException(status_code=400, detail="Complaints can only be reported within Bangalore city limits.")
 
     live_location_at = parse_client_timestamp(live_location_timestamp, "live_location_timestamp")
 
