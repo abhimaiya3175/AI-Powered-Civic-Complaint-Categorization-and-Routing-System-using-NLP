@@ -20,15 +20,17 @@
 | 🎤 **Voice Capture** | Citizens record complaints in **Kannada**, **Hindi**, or **English** |
 | 📍 **Location Tagging** | Citizens can auto-detect GPS OR pick/drag a marker on an interactive Leaflet map (with address search and geocoding) |
 | 📷 **Image Authenticity** | Camera/gallery image evidence validated via EXIF GPS + timestamp checks |
+| 📸 **YOLOv8n-seg Image Analysis** | Multi-class visual parsing (potholes, garbage, broken streetlights, waterlogging, damaged drains, illegal hoardings, overgrown parks, and water leaks) with normalized segment polygons rendering on canvas overlay |
+| 🛡️ **Cross-Modal Reconciliation** | Automated mismatch checking. Disagreements between text and visual classification trigger category conflict flags and downgrade trust tiering to protect against silent categorization hijacking |
 | 📹 **Desktop Webcam** | Citizens can now capture photos directly from their desktop via `getUserMedia` |
-| 🤖 **AI Pipeline** | Whisper STT (transcribe) → IndicTrans2/NLLB translation → TF-IDF + NB (98.99% acc.) → spaCy NER |
-| 🛡️ **Trust Tiers** | High trust (auto-verified) for valid photo+location; Medium trust for others |
+| 🤖 **AI Pipeline** | Whisper STT → IndicTrans2/NLLB translation → TF-IDF + NB (98.99% acc.) → spaCy NER → YOLOv8n-seg |
+| 🛡️ **Trust Tiers** | High trust (auto-verified) for valid photo+location; Medium trust for text-only; Downgraded to `manual_review` on mismatch |
 | 🗺️ **Interactive Maps** | Map widget in citizen portal for tagging; Dashboard map with markers for pending complaints |
 | 👥 **Duplicate Voting** | Duplicate complaints (same category within 0.5 km and 180 days) are merged: files deleted, vote count incremented |
 | 🔐 **JWT Auth** | Secure database-backed login with token-based access control |
 | ✅ **HITL Verification** | Admin verifies/edits AI-classified complaints before finalizing |
 | 🔊 **Audio Playback** | Officers listen to original voice recordings in the dashboard |
-| 📊 **Live Statistics** | Real-time stats with category and language breakdowns |
+| 📊 **Live Statistics** | Real-time stats with category, language, and pothole severity distributions |
 | 📈 **NLP Analytics Dashboard** | Comprehensive NLP metrics, energy monitoring, classifier confidence, NER quality, stage bottleneck analysis, and throughput tracking — all from real runtime data |
 
 ---
@@ -121,6 +123,10 @@ copy .env.example .env       # Windows
 # ADMIN_USERNAME=admin
 # ADMIN_PASSWORD=<your-secure-admin-password>
 #
+# # Threshold tuning parameters
+# ZERO_SHOT_MIN_CONFIDENCE=0.85
+# IMAGE_RECONCILE_CONFIDENCE_THRESHOLD=0.6
+#
 # # Database settings
 # DB_USER=postgres
 # DB_PASSWORD=<your-secure-db-password>
@@ -210,9 +216,10 @@ Expected result: only template files such as `.env.example` should appear.
 
 Trust policy:
 
-- Image + Live Location → **High trust** (`auto_verified`)
-- Text/Audio + Live Location → **Medium trust** (`manual_review`)
-- No Live Location → **Rejected**
+- Image + Live Location (EXIF match) → **High trust** (`status="verified"`, `trust_level="high"`)
+- Text/Audio + Live Location → **Medium trust** (`status="pending"`, `trust_level="medium"`)
+- Image/Text Category Disagreement (Cross-modal mismatch) → **Downgraded trust** (`status="pending"`, `trust_level="manual_review"`, `category_mismatch=True`)
+- No Live Location → **Rejected** (HTTP 400)
 
 ---
 
@@ -228,10 +235,10 @@ To prevent spam and keep the admin dashboard clean, the system automatically che
 
 ---
 
-## 🧠 NLP Pipeline
+## 🧠 NLP Pipeline & Image Analysis Chain
 
 ```
-🎤 Voice Input (Native Kannada)
+🎤 Voice Input (Native Kannada/Hindi) OR Text
     ↓
 📝 Whisper STT (Transcription in source language)
     ↓
@@ -239,7 +246,11 @@ To prevent spam and keep the admin dashboard clean, the system automatically che
     ↓
 🏷️ TF-IDF + Naive Bayes Classifier (98.99% accuracy)
     ↓
-💾 PostgreSQL / SQLite storage (with Live GPS)
+📸 YOLOv8n-seg Image Analysis (Multi-class visual parsing)
+    ↓
+⚖️ Cross-Modal Reconciliation (Checks visual category against text category)
+    ↓
+💾 PostgreSQL / SQLite storage (with Live GPS, Trust Scoring & Mismatch Flags)
 ```
 
 ---
