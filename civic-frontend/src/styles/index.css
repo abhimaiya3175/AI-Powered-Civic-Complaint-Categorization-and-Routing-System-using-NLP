@@ -159,6 +159,16 @@ code, .mono {
   color: var(--color-text-heading);
 }
 
+.text-highlight {
+  display: inline;
+  color: #0b1f44;
+  background: linear-gradient(180deg, rgba(255, 239, 122, 0.25) 0%, rgba(255, 214, 10, 0.58) 100%);
+  border-radius: 0.25rem;
+  padding: 0 0.2rem;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 /* ── Buttons ───────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;

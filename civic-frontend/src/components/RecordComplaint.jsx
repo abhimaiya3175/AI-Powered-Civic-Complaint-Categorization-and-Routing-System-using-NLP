@@ -132,6 +132,10 @@ export default function RecordComplaint() {
   const canvasRef = useRef(null);
   const navigate = useNavigate();
 
+  /* ── Map Sub-Components ──────────────────────────────────────── */
+
+
+
   /* ── Recording Controls ──────────────────────────────────────── */
   const startRecording = async () => {
     try {
@@ -262,6 +266,18 @@ export default function RecordComplaint() {
       );
     });
 
+  const BANGALORE_BOUNDS = {
+    minLat: 12.73,
+    maxLat: 13.14,
+    minLng: 77.37,
+    maxLng: 77.88
+  };
+
+  const isWithinBangalore = (lat, lng) => {
+    return lat >= BANGALORE_BOUNDS.minLat && lat <= BANGALORE_BOUNDS.maxLat &&
+           lng >= BANGALORE_BOUNDS.minLng && lng <= BANGALORE_BOUNDS.maxLng;
+  };
+
   const ensureLiveLocation = async ({ forceFresh = false } = {}) => {
     if (!forceFresh && liveLocation) {
       return liveLocation;
@@ -269,6 +285,11 @@ export default function RecordComplaint() {
 
     setLocationStatus('Capturing live location...');
     const nextLocation = await getCurrentLocation();
+    
+    if (!isWithinBangalore(nextLocation.latitude, nextLocation.longitude)) {
+      throw new Error('You can only report issues within Bangalore city limits.');
+    }
+
     setLiveLocation(nextLocation);
     setLocationStatus(
       `Live location captured: ${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`

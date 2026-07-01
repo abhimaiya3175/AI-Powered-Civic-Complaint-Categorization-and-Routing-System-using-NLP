@@ -3,6 +3,7 @@ import Navbar from './components/Navbar';
 import RecordComplaint from './components/RecordComplaint';
 import ComplaintList from './components/ComplaintList';
 import UserComplaints from './components/UserComplaints';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
               <Route path="/" element={<RecordComplaint />} />
               <Route path="/complaints" element={<UserComplaints />} />
               <Route path="/admin" element={<ComplaintList />} />
+              <Route path="/analytics" element={<AnalyticsDashboard />} />
             </Routes>
           </div>
         </main>

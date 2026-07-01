@@ -64,9 +64,13 @@ export const submitComplaint = async ({
 /**
  * Fetch paginated complaints (requires JWT token).
  */
-export const getComplaints = async (token, page = 1, size = 10) => {
+export const getComplaints = async (token, page = 1, size = 10, categoryMismatch = false) => {
+  let url = `${API_BASE}/complaints?page=${page}&size=${size}`;
+  if (categoryMismatch) {
+    url += `&category_mismatch=true`;
+  }
   const response = await fetch(
-    `${API_BASE}/complaints?page=${page}&size=${size}`,
+    url,
     {
       headers: { Authorization: `Bearer ${token}` },
     }
@@ -157,10 +161,11 @@ export const getAudioUrl = (audioPath, token) => {
 /**
  * Get public (unauthenticated) complaint listing.
  */
-export const getPublicComplaints = async ({ page = 1, size = 12, category = '', status = '', sort = 'latest' } = {}) => {
+export const getPublicComplaints = async ({ page = 1, size = 12, category = '', status = '', sort = 'latest', voterFingerprint = '' } = {}) => {
   const params = new URLSearchParams({ page, size, sort });
   if (category && category !== 'all') params.set('category', category);
   if (status && status !== 'all') params.set('status', status);
+  if (voterFingerprint) params.set('voter_fingerprint', voterFingerprint);
   const response = await fetch(`${API_BASE}/complaints/public?${params}`);
   if (!response.ok) throw new Error('Failed to load complaints');
   return response.json();
@@ -169,9 +174,10 @@ export const getPublicComplaints = async ({ page = 1, size = 12, category = '', 
 /**
  * Get resolved complaints archive (unauthenticated).
  */
-export const getResolvedComplaints = async ({ page = 1, size = 12, category = '' } = {}) => {
+export const getResolvedComplaints = async ({ page = 1, size = 12, category = '', voterFingerprint = '' } = {}) => {
   const params = new URLSearchParams({ page, size });
   if (category && category !== 'all') params.set('category', category);
+  if (voterFingerprint) params.set('voter_fingerprint', voterFingerprint);
   const response = await fetch(`${API_BASE}/complaints/resolved?${params}`);
   if (!response.ok) throw new Error('Failed to load resolved complaints');
   return response.json();
@@ -209,5 +215,61 @@ export const getVoterFingerprint = () => {
     localStorage.setItem('_bbmp_fp', fp);
   }
   return fp;
+};
+
+/**
+ * Reverse geocode lat/lng to a human-readable address via Nominatim (free, no key).
+ */
+export const reverseGeocode = async (lat, lng) => {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    if (!res.ok) return '';
+    const data = await res.json();
+    return data.display_name || '';
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Forward-search an address string to lat/lng via Nominatim.
+ * Returns the first result or null.
+ */
+export const searchAddress = async (query) => {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&addressdetails=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    if (!res.ok) return null;
+    const results = await res.json();
+    if (!results.length) return null;
+    return {
+      lat: parseFloat(results[0].lat),
+      lng: parseFloat(results[0].lon),
+      displayName: results[0].display_name || '',
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Fetch NLP Analytics Dashboard data (requires JWT token).
+ * Supports optional date range and language filters.
+ */
+export const getAnalyticsDashboard = async (token, { startDate, endDate, language } = {}) => {
+  const params = new URLSearchParams();
+  if (startDate) params.set('start_date', startDate);
+  if (endDate) params.set('end_date', endDate);
+  if (language) params.set('language', language);
+  const response = await fetch(`${API_BASE}/analytics/dashboard?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch analytics');
+  return response.json();
 };
 

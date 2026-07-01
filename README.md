@@ -18,16 +18,18 @@
 | Feature | Description |
 |---------|-------------|
 | 🎤 **Voice Capture** | Citizens record complaints in **Kannada**, **Hindi**, or **English** |
-| 📍 **Live Location Capture** | Complaint submission requires real-time GPS coordinates from the device |
+| 📍 **Location Tagging** | Citizens can auto-detect GPS OR pick/drag a marker on an interactive Leaflet map (with address search and geocoding) |
 | 📷 **Image Authenticity** | Camera/gallery image evidence validated via EXIF GPS + timestamp checks |
 | 📹 **Desktop Webcam** | Citizens can now capture photos directly from their desktop via `getUserMedia` |
-| 🤖 **AI Pipeline** | Whisper STT (transcribe) → IndicTrans2/NLLB translation → TF-IDF + NB (98.5% acc.) → spaCy NER |
+| 🤖 **AI Pipeline** | Whisper STT (transcribe) → IndicTrans2/NLLB translation → TF-IDF + NB (98.99% acc.) → spaCy NER |
 | 🛡️ **Trust Tiers** | High trust (auto-verified) for valid photo+location; Medium trust for others |
-| 🗺️ **Interactive Map** | Leaflet map with **dynamic red markers** for pending complaints (removed on verify) |
+| 🗺️ **Interactive Maps** | Map widget in citizen portal for tagging; Dashboard map with markers for pending complaints |
+| 👥 **Duplicate Voting** | Duplicate complaints (same category within 0.5 km and 180 days) are merged: files deleted, vote count incremented |
 | 🔐 **JWT Auth** | Secure database-backed login with token-based access control |
 | ✅ **HITL Verification** | Admin verifies/edits AI-classified complaints before finalizing |
 | 🔊 **Audio Playback** | Officers listen to original voice recordings in the dashboard |
 | 📊 **Live Statistics** | Real-time stats with category and language breakdowns |
+| 📈 **NLP Analytics Dashboard** | Comprehensive NLP metrics, energy monitoring, classifier confidence, NER quality, stage bottleneck analysis, and throughput tracking — all from real runtime data |
 
 ---
 
@@ -68,17 +70,19 @@ Civic Complaint/
         ├── main.jsx         # React entry point
         ├── App.jsx          # Root component + routing
         ├── components/
-        │   ├── Navbar.jsx          # Sticky navigation bar
-        │   ├── RecordComplaint.jsx # Citizen voice capture page
-        │   └── ComplaintList.jsx   # Admin dashboard page
+        │   ├── Navbar.jsx                # Sticky navigation bar
+        │   ├── RecordComplaint.jsx       # Citizen voice capture page
+        │   ├── ComplaintList.jsx         # Admin dashboard page
+        │   └── AnalyticsDashboard.jsx    # NLP analytics & energy monitoring
         ├── styles/
-        │   ├── index.css           # Global design system (tokens)
-        │   ├── Navbar.css          # Navbar styles
-        │   ├── RecordComplaint.css # Citizen portal styles
-        │   └── ComplaintList.css   # Admin dashboard styles
+        │   ├── index.css                 # Global design system (tokens)
+        │   ├── Navbar.css                # Navbar styles
+        │   ├── RecordComplaint.css       # Citizen portal styles
+        │   ├── ComplaintList.css         # Admin dashboard styles
+        │   └── AnalyticsDashboard.css    # Analytics dashboard styles
         ├── services/
-        │   └── api.js              # API client (fetch-based)
-        └── assets/                 # Static assets
+        │   └── api.js                    # API client (fetch-based)
+        └── assets/                       # Static assets
 ```
 
 ---
@@ -127,6 +131,9 @@ copy .env.example .env       # Windows
 # Install dependencies
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
+
+# (Optional) Retrain the TF-IDF + Naive Bayes category classifier
+python scripts/train_bbmp_model.py
 
 # If you add or upgrade Python packages, refresh the lock file before commit
 pip freeze > requirements.txt
@@ -209,6 +216,18 @@ Trust policy:
 
 ---
 
+## 👥 Duplicate Detection & Voting System
+
+To prevent spam and keep the admin dashboard clean, the system automatically checks for duplicate complaints:
+- **Criteria**: Same category, submitted within a **0.5 km radius** and **180 days** of an existing open complaint.
+- **Handling**:
+  - Instead of creating a new database record, the system increments the vote count of the existing complaint.
+  - Unique voter fingerprints (`voter_fingerprint`) are tracked in `complaint_votes` to prevent duplicate voting by the same user.
+  - Uploaded audio/image files for duplicate submissions are automatically deleted from storage to save disk space.
+- **Ranking**: Complaints are sorted by priority: `votes DESC, created_at DESC` (more votes first, then newer complaints).
+
+---
+
 ## 🧠 NLP Pipeline
 
 ```
@@ -218,7 +237,7 @@ Trust policy:
     ↓
 🌐 IndicTrans2/NLLB (Dedicated translation step)
     ↓
-🏷️ TF-IDF + Naive Bayes Classifier (98.5% accuracy)
+🏷️ TF-IDF + Naive Bayes Classifier (98.99% accuracy)
     ↓
 💾 PostgreSQL / SQLite storage (with Live GPS)
 ```
@@ -234,6 +253,7 @@ Trust policy:
 | `POST` | `/submit-complaint` | ❌ | Submit complaint with live location, optional audio/text, optional image evidence |
 | `GET` | `/complaints` | 🔐 | Paginated complaint list |
 | `GET` | `/complaints/stats` | 🔐 | Category & language statistics |
+| `GET` | `/analytics/dashboard` | 🔐 | Full NLP analytics & energy monitoring dashboard (supports `?start_date`, `?end_date`, `?language` filters) |
 | `PUT` | `/complaints/{id}/verify` | 🔐 | HITL verify/edit complaint |
 | `GET` | `/uploads/{filename}` | 🔐 | Serve protected uploaded media (audio/image) |
 
@@ -250,11 +270,72 @@ At least one of `file` or `text_note` is required.
 
 ---
 
+## 📊 NLP Analytics & Energy Monitoring Dashboard
+
+The system includes a comprehensive analytics dashboard at `/analytics` (JWT-protected) that provides deep insights into NLP pipeline performance, energy consumption, and system health. **Every metric is derived from real runtime data — zero hardcoded, estimated, random, static, or sample values.**
+
+### Key Metric Cards
+
+| Metric | Data Source | Calculation |
+|--------|------------|-------------|
+| Total Complaints Processed | `nlp_metrics` `COUNT(*)` | Direct DB query |
+| Unique Complaints | `complaints` `COUNT(*)` | Direct DB query |
+| Duplicate Complaints | `nlp_metrics` `WHERE is_duplicate=True` | Boolean flag set by duplicate detection |
+| Total Votes | `complaints` `SUM(votes)` | Direct DB aggregate |
+| Avg Processing Time | `nlp_metrics` `AVG(total_processing_time)` | Measured via `time.perf_counter()` |
+| Total Energy (J) | `nlp_metrics` `SUM(total_energy_joules)` | CPU TDP × measured processing time |
+| Classifier Confidence | `nlp_metrics.classifier_confidence` | `sklearn predict_proba()` per request |
+| Entity Count | `nlp_metrics.entity_count` | `len(spacy_doc.ents)` per request |
+| Audio Duration | `nlp_metrics.audio_duration_seconds` | `pydub AudioSegment.duration_seconds` |
+| Zero-shot Rate | `nlp_metrics.zero_shot_triggered` | Boolean flag per request |
+| Error Rate | `nlp_metrics.error_stage` | Exception handler captures stage name |
+
+### Charts (15+)
+
+- **Energy by Stage** — bar chart showing energy consumption per NLP stage
+- **Energy Over Time** — line chart with dual axis (Joules + request count)
+- **Stage Bottleneck Radar** — radar chart identifying the slowest NLP stages
+- **Throughput Over Time** — line chart showing complaints processed per day
+- **Category Distribution** — doughnut chart of complaint categories
+- **Source Language Distribution** — bar chart with avg processing time overlay
+- **Classifier Confidence Histogram** — color-coded (red < 0.5, yellow 0.5–0.85, green > 0.85)
+- **Category × Language Heatmap** — CSS-based matrix showing cross-tabulation
+- **NER Entity Count Distribution** — histogram of entities extracted per complaint
+- **Entity Type Breakdown** — doughnut chart (GPE vs LOC vs FAC vs ORG)
+- **Audio Duration vs Processing Time** — scatter plot validating linear scaling
+- **Error Rate by Stage** — bar chart identifying the most failure-prone pipeline steps
+- **Duplicate vs Unique** — pie chart
+- **Zero-shot Fallback Rate** — doughnut chart
+- **Votes per Complaint** — bar chart (top 20)
+- **Duplicate Cluster Sizes** — bar chart of vote distribution
+
+### Energy Calculation Methodology
+
+```
+Energy (J) = Estimated CPU TDP (W) × Measured Processing Time (s)
+```
+
+- **CPU TDP** is derived from actual hardware info at startup using `platform.processor()`, `platform.machine()`, and `os.cpu_count()`.
+- The CPU model string is classified into power tiers (ARM 10W, Mobile 15W, High-perf laptop 45W, Desktop 65W, Server 95W).
+- **Processing time** for each NLP stage (transcription, translation, classification, NER, zero-shot) is measured with `time.perf_counter()`.
+- The detection method and estimated wattage are logged at startup and stored in every `NlpMetric` record.
+- The exact derivation is visible in the API response (`data_sources` field) and in the dashboard's Verification Panel.
+
+> ⚠️ This is an estimation based on CPU TDP, not a direct hardware power measurement. The methodology is fully documented in every API response and the dashboard UI.
+
+### Filters
+
+The dashboard supports optional query parameters:
+- `start_date` / `end_date` — ISO date range filter
+- `language` — filter by source language (`en`, `kn`, `hi`)
+
+---
+
 ## 📦 Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| **Frontend** | React 19, Vite 8, Leaflet, React Router |
+| **Frontend** | React 19, Vite 8, Leaflet, React Router, Chart.js |
 | **Backend** | FastAPI, SQLAlchemy, Pydantic |
 | **AI/ML** | OpenAI Whisper, scikit-learn, spaCy |
 | **Translation** | Hugging Face Transformers (IndicTrans2 primary, NLLB fallback) |
