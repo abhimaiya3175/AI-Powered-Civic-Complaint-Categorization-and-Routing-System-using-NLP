@@ -20,10 +20,10 @@
 | 🎤 **Voice Capture** | Citizens record complaints in **Kannada**, **Hindi**, or **English** |
 | 📍 **Location Tagging** | Citizens can auto-detect GPS OR pick/drag a marker on an interactive Leaflet map (with address search and geocoding) |
 | 📷 **Image Authenticity** | Camera/gallery image evidence validated via EXIF GPS + timestamp checks |
-| 📸 **YOLOv8n-seg Image Analysis** | Multi-class visual parsing (potholes, garbage, broken streetlights, waterlogging, damaged drains, illegal hoardings, overgrown parks, and water leaks) with normalized segment polygons rendering on canvas overlay |
+| 📸 **Florence-2 Image Analysis** | Structured vision-language analysis (using `<OD>`, `<DENSE_REGION_CAPTION>`, `<CAPTION>`, and `<MORE_DETAILED_CAPTION>` tasks) for object detection, scene captioning, visual category matching, and severity estimation |
 | 🛡️ **Cross-Modal Reconciliation** | Automated mismatch checking. Disagreements between text and visual classification trigger category conflict flags and downgrade trust tiering to protect against silent categorization hijacking |
 | 📹 **Desktop Webcam** | Citizens can now capture photos directly from their desktop via `getUserMedia` |
-| 🤖 **AI Pipeline** | Whisper STT → IndicTrans2/NLLB translation → TF-IDF + NB (98.99% acc.) → spaCy NER → YOLOv8n-seg |
+| 🤖 **AI Pipeline** | Whisper STT → IndicTrans2/NLLB translation → TF-IDF + NB (98.99% acc.) → spaCy NER → Florence-2 |
 | 🛡️ **Trust Tiers** | High trust (auto-verified) for valid photo+location; Medium trust for text-only; Downgraded to `manual_review` on mismatch |
 | 🗺️ **Interactive Maps** | Map widget in citizen portal for tagging; Dashboard map showing all active complaints (color-coded by status, bypasses pagination limits, and automatically removes resolved reports) |
 | 👥 **Duplicate Voting** | Duplicate complaints (same category within 0.5 km and 180 days) are merged: files deleted, vote count incremented |

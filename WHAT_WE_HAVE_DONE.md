@@ -42,10 +42,10 @@ Implemented a robust three-tier translation chain to convert Kannada and Hindi t
 - **Time Bottleneck Trackers**: Measures individual execution latency for all core stages (`transcription`, `translation`, `classification`, `ner`, `zero_shot`) via `time.perf_counter()`.
 - **CPU TDP Detection & Energy Calculator**: Detects the processor type via `platform.processor()` and `os.cpu_count()`. Estimates the TDP power signature (e.g. low-power ARM, laptop Mobile, performance Desktop/Server) and dynamically computes cumulative energy consumption in Joules (`processing_time * CPU_TDP`).
 
-### 7. 🚧 Multi-Class YOLOv8 Image Analysis & Cross-Modal Reconciliation
-- **Multi-Class Detection**: Integrated an Ultralytics YOLOv8n-seg model (`civic_multiclass_seg_best.pt`) targeting 8 visually detectable classes (potholes, garbage piles, broken streetlights, waterlogging, damaged drains, illegal hoardings, overgrown parks, and water leaks).
-- **Coordinate Normalization**: Normalizes all visual bounding boxes and polygon boundaries to the `0.0 - 1.0` range, decoupling visual rendering from client-side screen resolutions.
-- **Cross-Modal Reconciliation**: Computes image department suggestions from top visual classes. If the visual suggestion disagrees with the text model at >60% confidence (`IMAGE_RECONCILE_CONFIDENCE_THRESHOLD`), the system flags the conflict and downgrades the trust level to `manual_review` and `status` to `pending`. **The text-predicted category is preserved (never silently overwritten).**
+### 7. 🚧 Structured Florence-2 Image Analysis & Cross-Modal Reconciliation
+- **Grounding and Captioning Pipeline**: Integrated the Microsoft `Florence-2-base` vision-language model, leveraging structured grounding tasks (`<OD>`, `<DENSE_REGION_CAPTION>`, `<CAPTION>`, and `<MORE_DETAILED_CAPTION>`) for robust multi-task visual parsing.
+- **Coordinate Normalization**: Extracts bounding boxes (`bbox`) from object detection and normalizes coordinates to a `0.0 - 1.0` range, decoupling visual overlay rendering from client-side screen resolutions.
+- **Cross-Modal Reconciliation**: Extracts text labels from object detection and dense captions, mapping them to canonical civic departments. If the visual department suggestion disagrees with the text model, the system flags the category mismatch, sets `category_mismatch = True`, and downgrades the trust level to `manual_review` and `status` to `pending`. **The text-predicted category is preserved to prevent silent hijacking.**
 - **Admin Panel Filter & Warning Badge**: Added an inline mismatch indicator (`⚠️ Mismatch`) to admin complaint cards, and a **Mismatches Only** filter checkbox to query all conflicting complaints.
 
 ---
@@ -83,7 +83,7 @@ The main components are located across the workspace:
 | Layer | Component Name & Location | Purpose |
 |---|---|---|
 | **Backend API** | [main.py](file:///e:/ProJect/Civic%20Complaint/main.py) | Main FastAPI service, endpoints, database schema upgrades, and pipeline routing. |
-| **Image Analysis** | [image_features.py](file:///e:/ProJect/Civic%20Complaint/image_features.py) | YOLOv8n-seg multi-class inference, 640px resizing, coordinate normalization, and severity bucketing. |
+| **Image Analysis** | [image_features.py](file:///e:/ProJect/Civic%20Complaint/image_features.py) | Florence-2 vision-language inference, structured grounding tasks, visual category mapping, and severity estimation. |
 | **NLP Utilities** | [nlp_features.py](file:///e:/ProJect/Civic%20Complaint/nlp_features.py) | NLP parsing logic (`build_multilingual_classification_text` concat functions). |
 | **ML Training** | [train_bbmp_model.py](file:///e:/ProJect/Civic%20Complaint/scripts/train_bbmp_model.py) | Vectorization (`FeatureUnion`), text augmentation, and model training script. |
 | **Frontend Router** | [App.jsx](file:///e:/ProJect/Civic%20Complaint/civic-frontend/src/App.jsx) | Handles routing for citizen portal, dashboards, and analytics. |

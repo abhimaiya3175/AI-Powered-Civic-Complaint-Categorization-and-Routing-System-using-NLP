@@ -724,34 +724,37 @@ spacy 3.8.11
 
 ---
 
-## 16. Stage 6 · Image Analysis & Reconciliation (YOLOv8n-seg)
+## 16. Stage 6 · Image Analysis & Reconciliation (Florence-2)
 
 This stage adds **cross-modal verification** by checking visual evidence against the text-based department routing.
 
 ### Model Specs & Config
-- **Model Architecture**: Ultralytics YOLOv8n-seg (segmentation)
-- **Loaded at startup** as a module-level singleton from `Models/civic_multiclass_seg_best.pt` (overridable via `YOLO_MODEL_PATH` env var).
+- **Model Architecture**: Microsoft `Florence-2-base` (vision-language model)
+- **Loaded lazily on first request** to optimize startup time and system resources, stored as a module-level singleton once initialized.
 - **Execution**: Offloaded to a separate CPU thread via `asyncio.to_thread` to ensure zero blocking on the main FastAPI event loop.
-- **Image Resizing**: Input images are dynamically resized to a maximum dimension of `640px` (maintaining aspect ratio) before prediction to optimize CPU inference latency.
+- **Structured Grounding Prompts**: Rather than parsing free-form prose, the model executes explicit structured tasks:
+  * `<CAPTION>` — Short visual description.
+  * `<MORE_DETAILED_CAPTION>` — Detailed scene description (raw evidence).
+  * `<OD>` — Structured object detection (labels and absolute bounding boxes).
+  * `<DENSE_REGION_CAPTION>` — Localized region descriptions.
 
-### Visually Detectable Classes (8 Mappings)
-The visual model outputs segmentations and classes, which are mapped to canon BBMP department categories via the `DETECTION_CLASS_TO_CATEGORY` mapping matrix:
+### Visual Keyword Mappings
+Grounding labels, captions, and region descriptions are concatenated and matched against canonical civic categories using the `VISUAL_KEYWORD_TO_CATEGORY` mapping matrix:
 
-| YOLO Class | Maps to Department | Severity Rule |
-|------------|---------------------|---------------|
-| `pothole` | `Road Repair` | Mask area vs Image area ratio |
-| `garbage_pile` | `Garbage / Sanitation` | Mask area vs Image area ratio |
-| `broken_streetlight` | `Street Light` | Presence-based |
-| `waterlogging` | `Drainage / SWD` | Mask area vs Image area ratio |
-| `damaged_drain` | `Drainage / SWD` | Presence-based |
-| `illegal_hoarding` | `Advertisement` | Presence-based |
-| `overgrown_park` | `Parks / Forest` | Presence-based |
-| `water_leak` | `Water Supply` | Presence-based |
+| Visual Keyword | Maps to Department | Severity Rule (from Caption) |
+|----------------|---------------------|------------------------------|
+| `pothole`, `road damage` | `Road Repair` | Keyword-based (`Low` | `Medium` | `High` | `Severe`) |
+| `garbage`, `waste` | `Garbage / Sanitation` | Keyword-based |
+| `streetlight`, `lamp` | `Street Light` | Keyword-based |
+| `waterlogging`, `drain` | `Drainage / SWD` | Keyword-based |
+| `leak`, `water supply` | `Water Supply` | Keyword-based |
+| `hoarding`, `billboard` | `Advertisement` | Keyword-based |
+| `overgrown`, `park` | `Parks / Forest` | Keyword-based |
 
-*Other categories (e.g. Revenue, Non-Civic, Veterinary, Town Planning, Traffic, Health/Sanitation, Others) are administrative/textual in nature and explicitly excluded from image analysis mapping.*
+*Other administrative/textual categories (e.g. Revenue, Non-Civic, Veterinary, Town Planning, Traffic, Health/Sanitation, Others) are explicitly excluded from image analysis mapping.*
 
 ### Coordinate Normalization
-All bounding box (`bbox` coordinate arrays `[xmin, ymin, xmax, ymax]`) and segmentation boundaries (`mask_polygon` coordinates `[[x1, y1], [x2, y2], ...]`) are normalized to a `0.0 - 1.0` range relative to the inference image canvas dimensions, ensuring they align perfectly with any UI screen size in the admin overlay.
+Object bounding boxes (`[xmin, ymin, xmax, ymax]`) are converted from absolute pixel values and normalized to a `0.0 - 1.0` range relative to the input image dimensions. This ensures that overlays align perfectly when rendered inside the client-side Leaflet map or detail views.
 
 ### Cross-Modal Reconciliation Logic
 The pipeline protects against silent category hijacking by using the image analysis strictly for **validation/mismatch checking** and **trust level overrides**, never overwriting the text classifier’s `category`.
@@ -769,12 +772,11 @@ The pipeline protects against silent category hijacking by using the image analy
                                  ▼
                   ┌───────────────────────────────┐
                   │ Stage 6: Image Analysis       │
-                  │ (YOLOv8n-seg Prediction)      │
+                  │ (Florence-2 Prediction)       │
                   └──────────────┬────────────────┘
                                  │
                                  ▼
          Disagreement Check:
-         - Top visual detection confidence > threshold (default 0.6)
          - Image-suggested category != text-predicted category
                                  │
                  ┌───────────────┴───────────────┐
