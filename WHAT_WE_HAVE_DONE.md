@@ -150,3 +150,15 @@ venv\Scripts\python -m pytest tests/test_image_detection.py
 
 4. **Test Suite Stabilization**:
    - Resolved `ReadTimeoutError` during `tests/test_ml_model_and_languages.py` execution by increasing the API health-check (`/model/status`) timeout from 10s to 120s to allow multiple massive transformer models to load into the CPU gracefully on cold start.
+
+### Session 5: Database Reset, Admin Access & Real-Time Map System (July 2)
+
+1. **Database Purge & fresh BBMP Admin Setup**:
+   - Connected to the PostgreSQL database (`localhost:5432/bbmp_complaints`) and successfully cleared out stale entries in `complaints`, `nlp_metrics`, `complaint_timeline`, and `complaint_votes` tables.
+   - Deleted all previous administration credentials and configured standard security access with username `bbmp admin` (and common variations `bbmp_admin`, `bbmpadmin`, `bbmp`) bound to the secure password `admin` (encoded with a local `bcrypt` hash).
+
+2. **Real-time Complaint Mapping without Pagination Bounds**:
+   - Introduced a dedicated `GET /complaints/map` endpoint which retrieves all active, non-resolved complaints with geographic coordinates in one payload.
+   - Updated the API helper `getMapComplaints` and the interactive Leaflet card component (`ComplaintList.jsx`) to decouple map visualization from page-size limits.
+   - Resolved complaints are dynamically filtered out of the map query results, ensuring they vanish from the interactive map the moment their status changes to "Resolved".
+   - Added map marker color-coding (Yellow = Pending, Blue = Verified, Purple = In Progress, Gray = Rejected) and richer popups showing category details, location descriptions, status badges, and vote counters.

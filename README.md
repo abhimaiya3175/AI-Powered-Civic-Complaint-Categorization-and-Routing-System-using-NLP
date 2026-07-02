@@ -25,7 +25,7 @@
 | 📹 **Desktop Webcam** | Citizens can now capture photos directly from their desktop via `getUserMedia` |
 | 🤖 **AI Pipeline** | Whisper STT → IndicTrans2/NLLB translation → TF-IDF + NB (98.99% acc.) → spaCy NER → YOLOv8n-seg |
 | 🛡️ **Trust Tiers** | High trust (auto-verified) for valid photo+location; Medium trust for text-only; Downgraded to `manual_review` on mismatch |
-| 🗺️ **Interactive Maps** | Map widget in citizen portal for tagging; Dashboard map with markers for pending complaints |
+| 🗺️ **Interactive Maps** | Map widget in citizen portal for tagging; Dashboard map showing all active complaints (color-coded by status, bypasses pagination limits, and automatically removes resolved reports) |
 | 👥 **Duplicate Voting** | Duplicate complaints (same category within 0.5 km and 180 days) are merged: files deleted, vote count incremented |
 | 🔐 **JWT Auth** | Secure database-backed login with token-based access control |
 | ✅ **HITL Verification** | Admin verifies/edits AI-classified complaints before finalizing |
