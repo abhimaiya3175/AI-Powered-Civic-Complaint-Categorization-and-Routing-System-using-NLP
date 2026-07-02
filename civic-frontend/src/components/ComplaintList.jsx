@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
-import { getComplaints, verifyComplaint, getStats, loginAdmin, getAudioUrl, getComplaintTimeline, reanalyzeImage } from '../services/api';
+import { getComplaints, verifyComplaint, getStats, loginAdmin, getAudioUrl, getComplaintTimeline, reanalyzeImage, getMapComplaints } from '../services/api';
 import { MapContainer, TileLayer, Popup, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import '../styles/ComplaintList.css';
@@ -160,6 +160,7 @@ function SkeletonCard() {
 
 export default function ComplaintList() {
   const [complaints, setComplaints] = useState([]);
+  const [mapComplaints, setMapComplaints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -222,14 +223,21 @@ export default function ComplaintList() {
     setLoading(false);
   }, [handleLogout, page, token, mismatchFilter]);
 
+  const fetchMapComplaints = useCallback(async () => {
+    try {
+      const data = await getMapComplaints(token);
+      setMapComplaints(data.items || []);
+    } catch (err) { if (isAuthError(err)) handleLogout(); }
+  }, [handleLogout, token]);
+
   const fetchStats = useCallback(async () => {
     try { const data = await getStats(token); setStats(data); }
     catch (err) { if (isAuthError(err)) handleLogout(); }
   }, [handleLogout, token]);
 
   useEffect(() => {
-    if (loggedIn) { fetchComplaints(); fetchStats(); }
-  }, [fetchComplaints, fetchStats, loggedIn]);
+    if (loggedIn) { fetchComplaints(); fetchMapComplaints(); fetchStats(); }
+  }, [fetchComplaints, fetchMapComplaints, fetchStats, loggedIn]);
 
   /* ── HITL ───────────────────────────────────────────────────── */
   const handleStatusUpdate = async (id, newStatus) => {
@@ -237,7 +245,7 @@ export default function ComplaintList() {
       await verifyComplaint(token, id, { status: newStatus, note: (adminNotes[id] || '').trim() || undefined });
       setAdminNotes(p => ({ ...p, [id]: '' }));
       if (tlOpen[id]) await loadTimeline(id);
-      fetchComplaints(); fetchStats();
+      fetchComplaints(); fetchMapComplaints(); fetchStats();
     } catch (e) {
       if (isAuthError(e)) handleLogout();
       else alert(e.message || 'Failed to update complaint');
@@ -448,16 +456,39 @@ export default function ComplaintList() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" x2="9" y1="3" y2="18"/><line x1="15" x2="15" y1="6" y2="21"/></svg>
             Complaint Map
           </h3>
+          <span style={{fontSize:'0.75rem',color:'#64748B',marginLeft:'auto'}}>
+            {mapComplaints.length} active complaint{mapComplaints.length !== 1 ? 's' : ''} on map
+          </span>
         </div>
         <div className="map-container">
           <MapContainer center={[12.9716, 77.5946]} zoom={11} className="map-container">
             <TileLayer attribution='&copy; <a href="https://carto.com/">CARTO</a>' url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
-            {complaints.filter(c => c.status !== 'Verified' && c.live_latitude && c.live_longitude).map(c => (
-              <CircleMarker key={`marker-${c.id}`} center={[c.live_latitude, c.live_longitude]} radius={8}
-                pathOptions={{ fillColor:'#EF4444', fillOpacity:0.8, color:'#FFFFFF', weight:2 }}>
-                <Popup><div className="map-popup"><strong>{c.category}</strong><span>{c.location}</span></div></Popup>
-              </CircleMarker>
-            ))}
+            {mapComplaints.map(c => {
+              const statusColors = {
+                'pending':     { fill: '#F59E0B', stroke: '#B45309' },
+                'Verified':    { fill: '#0284C7', stroke: '#0369A1' },
+                'In Progress': { fill: '#8B5CF6', stroke: '#6D28D9' },
+                'Rejected':    { fill: '#6B7280', stroke: '#374151' },
+              };
+              const col = statusColors[(c.status || 'pending')] || statusColors['pending'];
+              return (
+                <CircleMarker
+                  key={`marker-${c.id}`}
+                  center={[c.live_latitude, c.live_longitude]}
+                  radius={9}
+                  pathOptions={{ fillColor: col.fill, fillOpacity: 0.88, color: col.stroke, weight: 2 }}
+                >
+                  <Popup>
+                    <div className="map-popup">
+                      <strong>{c.category}</strong>
+                      <span style={{display:'block',marginTop:'2px',color:'#64748B',fontSize:'0.78rem'}}>{c.location}</span>
+                      <span style={{display:'inline-block',marginTop:'4px',padding:'1px 7px',borderRadius:'999px',fontSize:'0.72rem',fontWeight:600,background: col.fill,color:'#fff'}}>{c.status || 'pending'}</span>
+                      {c.votes > 0 && <span style={{marginLeft:'6px',fontSize:'0.72rem',color:'#64748B'}}>👍 {c.votes}</span>}
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              );
+            })}
           </MapContainer>
         </div>
       </div>

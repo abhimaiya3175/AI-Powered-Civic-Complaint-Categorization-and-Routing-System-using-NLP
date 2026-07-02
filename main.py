@@ -2482,6 +2482,39 @@ async def reanalyze_complaint_image(
     logger.info("Admin %s triggered image re-analysis for complaint %d", current_user, id)
     return {"msg": "Image re-analysis started in the background", "status": "processing"}
 
+# ---------- Map Complaints (JWT-protected, all with GPS, non-resolved) ----------
+@app.get("/complaints/map", tags=["complaints"])
+def get_map_complaints(
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+    """Return all non-resolved complaints that have GPS coordinates, for map display."""
+    items = (
+        db.query(Complaint)
+        .filter(
+            Complaint.status != "Resolved",
+            Complaint.live_latitude.isnot(None),
+            Complaint.live_longitude.isnot(None),
+        )
+        .order_by(Complaint.created_at.desc())
+        .all()
+    )
+    return {
+        "items": [
+            {
+                "id": c.id,
+                "category": c.category,
+                "location": c.location,
+                "status": c.status,
+                "votes": c.votes or 0,
+                "live_latitude": c.live_latitude,
+                "live_longitude": c.live_longitude,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in items
+        ]
+    }
+
 # ---------- List Complaints (Paginated, JWT-protected) ----------
 @app.get("/complaints")
 async def get_complaints(

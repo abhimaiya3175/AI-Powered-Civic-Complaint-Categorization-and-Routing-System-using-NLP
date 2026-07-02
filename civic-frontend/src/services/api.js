@@ -84,6 +84,17 @@ export const getComplaints = async (token, page = 1, size = 10, categoryMismatch
 };
 
 /**
+ * Fetch all non-resolved complaints with GPS coordinates for the map view (requires JWT token).
+ */
+export const getMapComplaints = async (token) => {
+  const response = await fetch(`${API_BASE}/complaints/map`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch map complaints');
+  return response.json();
+};
+
+/**
  * Verify / edit a complaint (HITL — requires JWT token).
  */
 export const verifyComplaint = async (token, complaintId, data = {}) => {
