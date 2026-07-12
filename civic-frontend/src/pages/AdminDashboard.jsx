@@ -1,5 +1,9 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
-import { getComplaints, verifyComplaint, getStats, loginAdmin, getAudioUrl, getComplaintTimeline, reanalyzeImage, getMapComplaints } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
+import { getComplaints, verifyComplaint, getComplaintTimeline, getMapComplaints } from '../services/complaintService';
+import { getStats } from '../services/analyticsService';
+import { getAudioUrl } from '../utils/helpers';
+import { reanalyzeImage } from '../services/uploadService';
 import { MapContainer, TileLayer, Popup, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import '../styles/ComplaintList.css';
@@ -32,9 +36,9 @@ const STATUS_MAP = {
   Resolved:      { cls: 'resolved',   icon: '🎉', label: 'Resolved' },
 };
 
-const isAuthError = (error) => {
-  const m = String(error?.message || '').toLowerCase();
-  return m.includes('401') || m.includes('token') || m.includes('log in');
+const isAuthError = (err) => {
+  const m = String(err?.message || '').toLowerCase();
+  return m.includes('401') || m.includes('token') || m.includes('log in') || m.includes('unauthorized');
 };
 
 function StatusBadge({ status }) {
@@ -158,18 +162,15 @@ function SkeletonCard() {
   );
 }
 
-export default function ComplaintList() {
+export default function AdminDashboard() {
+  const { token, logout, isAuthenticated } = useAuth();
   const [complaints, setComplaints] = useState([]);
   const [mapComplaints, setMapComplaints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('latest');
+  const [sortBy, setSortBy] = useState('most_voted');
   const [stats, setStats] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('bbmp_token') || '');
-  const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem('bbmp_token'));
-  const [loginError, setLoginError] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -185,31 +186,19 @@ export default function ComplaintList() {
   const [tlOpen, setTlOpen] = useState({});
   const [mismatchFilter, setMismatchFilter] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState({});
+  const [mapOpen, setMapOpen] = useState(false);
   
   const toggleAiPanel = (id) => setAiPanelOpen(p => ({ ...p, [id]: !p[id] }));
 
   useEffect(() => { audioSourcesRef.current = audioSources; }, [audioSources]);
 
   /* ── Auth ───────────────────────────────────────────────────── */
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    const form = e.target;
-    setLoginError(''); setLoginLoading(true);
-    try {
-      const data = await loginAdmin(form.username.value, form.password.value);
-      setToken(data.access_token);
-      localStorage.setItem('bbmp_token', data.access_token);
-      setLoggedIn(true);
-    } catch (err) { setLoginError(err.message); }
-    setLoginLoading(false);
-  };
-
   const handleLogout = useCallback(() => {
     Object.values(audioSourcesRef.current).forEach((url) => URL.revokeObjectURL(url));
-    setToken(''); localStorage.removeItem('bbmp_token');
-    setLoggedIn(false); setComplaints([]); setStats(null);
+    logout();
+    setComplaints([]); setStats(null);
     setAudioSources({}); setAudioLoading({});
-  }, []);
+  }, [logout]);
 
   /* ── Fetch ──────────────────────────────────────────────────── */
   const fetchComplaints = useCallback(async () => {
@@ -236,8 +225,8 @@ export default function ComplaintList() {
   }, [handleLogout, token]);
 
   useEffect(() => {
-    if (loggedIn) { fetchComplaints(); fetchMapComplaints(); fetchStats(); }
-  }, [fetchComplaints, fetchMapComplaints, fetchStats, loggedIn]);
+    if (isAuthenticated) { fetchComplaints(); fetchMapComplaints(); fetchStats(); }
+  }, [fetchComplaints, fetchMapComplaints, fetchStats, isAuthenticated]);
 
   /* ── HITL ───────────────────────────────────────────────────── */
   const handleStatusUpdate = async (id, newStatus) => {
@@ -312,6 +301,9 @@ export default function ComplaintList() {
   };
 
   /* ── Derived data ───────────────────────────────────────────── */
+  // Compute global max from ALL loaded complaints (not just filtered page)
+  const globalMaxVotes = Math.max(...complaints.map(c => c.votes || 0), 1);
+
   const filtered = complaints
     .filter(c => filter === 'all' || (c.status || '').toLowerCase() === filter.toLowerCase())
     .filter(c => categoryFilter === 'all' || c.category === categoryFilter)
@@ -324,48 +316,32 @@ export default function ComplaintList() {
       return new Date(b.created_at) - new Date(a.created_at);
     });
 
-  const maxVotes = Math.max(...filtered.map(c => c.votes || 0), 0);
-  const HIGH_PRIORITY = Math.max(3, Math.round(maxVotes * 0.6));
+  // Tiered priority thresholds (relative to globalMaxVotes)
+  const CRITICAL_THRESHOLD = Math.max(5, Math.round(globalMaxVotes * 0.75));
+  const HIGH_THRESHOLD     = Math.max(3, Math.round(globalMaxVotes * 0.4));
+  const MEDIUM_THRESHOLD   = Math.max(2, Math.round(globalMaxVotes * 0.2));
+
+  const getVotePriority = (votes) => {
+    const v = votes || 0;
+    if (v >= CRITICAL_THRESHOLD) return 'critical';
+    if (v >= HIGH_THRESHOLD)     return 'high';
+    if (v >= MEDIUM_THRESHOLD)   return 'medium';
+    return 'none';
+  };
+
+  // Top-voted leaderboard (top 3 by votes, at least 2 votes)
+  const topVoted = [...complaints]
+    .filter(c => (c.votes || 0) >= 2)
+    .sort((a, b) => (b.votes || 0) - (a.votes || 0))
+    .slice(0, 3);
+
 
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : '—';
   const statusCls = (s) => (STATUS_MAP[s] || STATUS_MAP.pending).cls;
 
   /* ── Login Screen ───────────────────────────────────────────── */
-  if (!loggedIn) {
-    return (
-      <div className="login-wrapper gravless-container">
-        <div className="login-card">
-          <div className="login-header">
-            <div className="login-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>
-              </svg>
-            </div>
-            <h2>Admin Dashboard</h2>
-            <p className="login-subtext">Sign in to manage and verify complaints</p>
-          </div>
-          <form onSubmit={handleLogin} className="login-form">
-            <div className="form-group">
-              <label htmlFor="login-username" className="form-label">Username</label>
-              <input id="login-username" name="username" className="input" placeholder="Enter username" required autoComplete="username" />
-            </div>
-            <div className="form-group">
-              <label htmlFor="login-password" className="form-label">Password</label>
-              <input id="login-password" name="password" type="password" className="input" placeholder="Enter password" required autoComplete="current-password" />
-            </div>
-            {loginError && (
-              <div className="login-error">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
-                {loginError}
-              </div>
-            )}
-            <button type="submit" className="btn btn-primary btn-lg login-btn" disabled={loginLoading}>
-              {loginLoading ? <><span className="spinner" /> Signing in…</> : 'Sign In'}
-            </button>
-          </form>
-        </div>
-      </div>
-    );
+  if (!isAuthenticated) {
+    return null; // ProtectedRoute will handle redirection to /admin/login
   }
 
   /* ── Loading ────────────────────────────────────────────────── */
@@ -471,19 +447,22 @@ export default function ComplaintList() {
                 'Rejected':    { fill: '#6B7280', stroke: '#374151' },
               };
               const col = statusColors[(c.status || 'pending')] || statusColors['pending'];
+              // Radius scales with vote count: base 8, max 22
+              const voteRadius = Math.min(22, 8 + Math.round(((c.votes || 0) / Math.max(globalMaxVotes, 1)) * 14));
               return (
                 <CircleMarker
                   key={`marker-${c.id}`}
                   center={[c.live_latitude, c.live_longitude]}
-                  radius={9}
-                  pathOptions={{ fillColor: col.fill, fillOpacity: 0.88, color: col.stroke, weight: 2 }}
+                  radius={voteRadius}
+                  pathOptions={{ fillColor: col.fill, fillOpacity: 0.88, color: col.stroke, weight: (c.votes || 0) >= HIGH_THRESHOLD ? 3 : 2 }}
                 >
                   <Popup>
                     <div className="map-popup">
                       <strong>{c.category}</strong>
                       <span style={{display:'block',marginTop:'2px',color:'#64748B',fontSize:'0.78rem'}}>{c.location}</span>
                       <span style={{display:'inline-block',marginTop:'4px',padding:'1px 7px',borderRadius:'999px',fontSize:'0.72rem',fontWeight:600,background: col.fill,color:'#fff'}}>{c.status || 'pending'}</span>
-                      {c.votes > 0 && <span style={{marginLeft:'6px',fontSize:'0.72rem',color:'#64748B'}}>👍 {c.votes}</span>}
+                      {c.votes > 0 && <span style={{marginLeft:'6px',fontSize:'0.72rem',color:'#64748B'}}>👍 {c.votes} votes</span>}
+                      {(c.votes || 0) >= CRITICAL_THRESHOLD && <span style={{display:'block',marginTop:'4px',fontSize:'0.72rem',fontWeight:700,color:'#DC2626'}}>🔥 Critical Priority</span>}
                     </div>
                   </Popup>
                 </CircleMarker>
@@ -508,8 +487,8 @@ export default function ComplaintList() {
             {CATEGORY_OPTIONS.map(cat => <option key={cat} value={cat}>{cat}</option>)}
           </select>
           <select className="admin-filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
-            <option value="latest">Latest First</option>
-            <option value="most_voted">Most Voted</option>
+            <option value="most_voted">🔥 Most Voted (Priority)</option>
+            <option value="latest">🕐 Latest First</option>
           </select>
           <label className="mismatch-filter-label" style={{display:'flex',alignItems:'center',gap:'0.3rem',fontSize:'0.85rem',cursor:'pointer'}}>
             <input type="checkbox" checked={mismatchFilter} onChange={e => setMismatchFilter(e.target.checked)} />
@@ -518,6 +497,35 @@ export default function ComplaintList() {
           <span className="results-count"><strong>{totalItems}</strong> total</span>
         </div>
       </div>
+
+      {/* Top-Voted Priority Leaderboard */}
+      {topVoted.length > 0 && (
+        <div className="priority-leaderboard">
+          <div className="leaderboard-header">
+            <span className="leaderboard-title">🔥 Top Priority Complaints</span>
+            <span className="leaderboard-subtitle">Sorted by community votes — highest urgency</span>
+          </div>
+          <div className="leaderboard-list">
+            {topVoted.map((c, rank) => {
+              const pct = Math.round(((c.votes || 0) / globalMaxVotes) * 100);
+              const rankColors = ['#DC2626','#EA580C','#D97706'];
+              return (
+                <div key={c.id} className="leaderboard-item" onClick={() => document.getElementById(`complaint-${c.id}`)?.scrollIntoView({behavior:'smooth', block:'center'})}>
+                  <div className="lb-rank" style={{background: rankColors[rank] || '#64748B'}}>#{rank + 1}</div>
+                  <div className="lb-info">
+                    <span className="lb-cat">{CAT_ICONS[c.category] || '📋'} {c.category}</span>
+                    <span className="lb-loc">{c.location}</span>
+                  </div>
+                  <div className="lb-votes">
+                    <div className="lb-vote-bar" style={{width:`${pct}%`, background: rankColors[rank] || '#64748B'}} />
+                    <span className="lb-vote-count">👍 {c.votes}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Cards */}
       {filtered.length === 0 ? (
@@ -529,10 +537,13 @@ export default function ComplaintList() {
       ) : (
         <div className="complaints-grid">
           {filtered.map(c => {
-            const isHigh = (c.votes||0) >= HIGH_PRIORITY && HIGH_PRIORITY >= 1;
+            const priority = getVotePriority(c.votes);
+            const votePct  = Math.round(((c.votes || 0) / globalMaxVotes) * 100);
             const sCls = statusCls(c.status);
             return (
-              <div key={c.id} className={`complaint-card ${sCls}-glow`} id={`complaint-${c.id}`}>
+              <div key={c.id}
+                className={`complaint-card ${sCls}-glow${priority === 'critical' ? ' priority-critical-card' : priority === 'high' ? ' priority-high-card' : ''}`}
+                id={`complaint-${c.id}`}>
                 <div className="cc-inner">
                   {/* Header */}
                   <div className="ccard-header">
@@ -544,8 +555,12 @@ export default function ComplaintList() {
                       </div>
                     </div>
                     <div className="cc-head-right">
-                      {isHigh && <span className="badge-priority">🔥 High Priority</span>}
-                      {(c.votes||0) > 0 && <span className="vote-count-badge">👍 {c.votes}</span>}
+                      {priority === 'critical' && <span className="badge-priority badge-critical">🔥 Critical</span>}
+                      {priority === 'high'     && <span className="badge-priority badge-high">⚠️ High Priority</span>}
+                      {priority === 'medium'   && <span className="badge-priority badge-medium">📌 Medium</span>}
+                      {(c.votes||0) > 0 && (
+                        <span className={`vote-count-badge vote-${priority}`}>👍 {c.votes}</span>
+                      )}
                       {c.category_mismatch && (
                         <span className="badge-warning tooltip" title={`Image suggests: ${c.image_suggested_category}`}>
                           ⚠️ Mismatch
@@ -559,6 +574,20 @@ export default function ComplaintList() {
                       <StatusBadge status={c.status} />
                     </div>
                   </div>
+
+                  {/* Vote Priority Bar */}
+                  {(c.votes || 0) > 0 && (
+                    <div className="vote-priority-row">
+                      <span className="vote-priority-label">Community Votes</span>
+                      <div className="vote-bar-track">
+                        <div
+                          className={`vote-bar-fill vote-fill-${priority}`}
+                          style={{ width: `${votePct}%` }}
+                        />
+                      </div>
+                      <span className="vote-bar-pct">{votePct}%</span>
+                    </div>
+                  )}
 
                   {/* Body */}
                   <div className="ccard-body">
@@ -630,6 +659,24 @@ export default function ComplaintList() {
                                     <p><strong>Problem Type:</strong> {c.florence_analysis.problem_type || 'None'}</p>
                                     <p><strong>Severity:</strong> <span className={`severity-badge severity-${c.florence_analysis.severity?.toLowerCase()}`}>{c.florence_analysis.severity}</span></p>
                                     <p><strong>Evidence Text:</strong> <em>{c.florence_analysis.supporting_evidence}</em></p>
+                                    {c.florence_analysis.all_suggested_categories?.length > 0 && (
+                                      <div style={{ marginTop: '0.5rem' }}>
+                                        <strong>Detected Categories:</strong>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.3rem' }}>
+                                          {c.florence_analysis.all_suggested_categories.map((cat, idx) => (
+                                            <span key={idx} className={`badge-info`} style={{
+                                              padding: '0.2rem 0.5rem',
+                                              borderRadius: '0.25rem',
+                                              fontSize: '0.75rem',
+                                              opacity: idx === 0 ? 1 : 0.75,
+                                              fontWeight: idx === 0 ? '600' : '400',
+                                            }}>
+                                              {cat.category} ({cat.score})
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
                                     <p className="text-muted text-xs">Processed in {c.florence_analysis.processing_time}s</p>
                                   </>
                                 ) : c.florence_analysis?.status === 'error' || c.florence_analysis?.status === 'timeout' ? (

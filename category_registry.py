@@ -102,6 +102,102 @@ VISUAL_KEYWORD_TO_CATEGORY: dict[str, str] = {
     "open defecation": "Health / Sanitation",
 }
 
+# ── Florence-2 caption-context phrases → canonical category ───────────
+# Florence-2 captions describe scenes ("wet and muddy road with puddles")
+# rather than listing object labels. These contextual phrases are matched
+# against <CAPTION> and <MORE_DETAILED_CAPTION> output to catch road/civic
+# issues that <OD> misses (e.g. OD sees "building" but caption says "muddy road").
+CAPTION_CONTEXT_TO_CATEGORY: dict[str, str] = {
+    # Road Repair — caption phrases for damaged / poor road conditions
+    "muddy road": "Road Repair",
+    "damaged road": "Road Repair",
+    "broken road": "Road Repair",
+    "rough road": "Road Repair",
+    "uneven road": "Road Repair",
+    "bumpy road": "Road Repair",
+    "road with holes": "Road Repair",
+    "dilapidated road": "Road Repair",
+    "cracked road": "Road Repair",
+    "deteriorated road": "Road Repair",
+    "poor road": "Road Repair",
+    "bad road": "Road Repair",
+    "unpaved road": "Road Repair",
+    "dirt road in": "Road Repair",
+    "road is in bad": "Road Repair",
+    "road is damaged": "Road Repair",
+    "road surface": "Road Repair",
+    "road is broken": "Road Repair",
+    "puddles": "Road Repair",
+    "puddle": "Road Repair",
+    "mud on road": "Road Repair",
+    "mud on the road": "Road Repair",
+    "muddy street": "Road Repair",
+    "wet and muddy": "Road Repair",
+    # Drainage / SWD — flooding / waterlogging
+    "flooded road": "Drainage / SWD",
+    "flooded street": "Drainage / SWD",
+    "water on road": "Drainage / SWD",
+    "water on the road": "Drainage / SWD",
+    "waterlogged": "Drainage / SWD",
+    "water logged": "Drainage / SWD",
+    "standing water": "Drainage / SWD",
+    "overflowing drain": "Drainage / SWD",
+    "water covering": "Drainage / SWD",
+    "water pooling": "Drainage / SWD",
+    "water filled road": "Drainage / SWD",
+    "water fills the road": "Drainage / SWD",
+    "large puddles of water": "Drainage / SWD",
+    "puddles of water covering": "Drainage / SWD",
+    "water covering the ground": "Drainage / SWD",
+    # Garbage / Sanitation
+    "pile of garbage": "Garbage / Sanitation",
+    "garbage pile": "Garbage / Sanitation",
+    "litter on": "Garbage / Sanitation",
+    "dirty street": "Garbage / Sanitation",
+    "waste dump": "Garbage / Sanitation",
+    "trash heap": "Garbage / Sanitation",
+    "rubbish pile": "Garbage / Sanitation",
+    "overflowing bin": "Garbage / Sanitation",
+    "waste on road": "Garbage / Sanitation",
+    "garbage on road": "Garbage / Sanitation",
+    "trash on road": "Garbage / Sanitation",
+    "piled up garbage": "Garbage / Sanitation",
+    "uncollected waste": "Garbage / Sanitation",
+    # Street Light
+    "broken lamp": "Street Light",
+    "dark street": "Street Light",
+    "unlit road": "Street Light",
+    "no light": "Street Light",
+    "damaged lamp": "Street Light",
+    "broken street light": "Street Light",
+    # Health / Sanitation
+    "stagnant water": "Health / Sanitation",
+    "dirty water": "Health / Sanitation",
+    "open sewer": "Health / Sanitation",
+    "mosquito breeding": "Health / Sanitation",
+    # Parks
+    "broken playground": "Parks",
+    "damaged park": "Parks",
+    "overgrown park": "Parks",
+    "unmaintained park": "Parks",
+    # Traffic
+    "traffic jam": "Traffic",
+    "traffic congestion": "Traffic",
+    "vehicles stuck": "Traffic",
+    "heavy traffic": "Traffic",
+    "broken signal": "Traffic",
+    "traffic signal": "Traffic",
+    # Town Planning
+    "illegal construction": "Town Planning",
+    "unauthorized building": "Town Planning",
+    "encroachment": "Town Planning",
+    # Water Supply
+    "broken pipe": "Water Supply",
+    "leaking pipe": "Water Supply",
+    "water leak": "Water Supply",
+    "no water supply": "Water Supply",
+}
+
 # ── Caption-based severity keywords ──────────────────────────────────
 # Applied by compute_caption_severity() in image_features.py.
 # Checked in order — first matching severity level wins.
@@ -109,17 +205,22 @@ SEVERITY_KEYWORDS: list[tuple[str, list[str]]] = [
     ("Severe", [
         "collapsed", "dangerous", "hazardous", "flooded", "destroyed",
         "major", "catastrophic", "life-threatening", "emergency", "critical",
+        "severely damaged", "completely broken",
     ]),
     ("High", [
         "large", "broken", "blocked", "overflowing", "damaged", "severe",
         "extensive", "significant", "deep", "wide", "big",
+        "muddy", "large puddles", "gloomy", "wet and muddy",
+        "heavily damaged", "dilapidated", "deteriorated",
     ]),
     ("Medium", [
         "cracked", "leaking", "partial", "moderate", "noticeable",
         "visible", "uneven", "dirty", "clogged",
+        "wet", "rough", "puddles", "bumpy", "unpaved",
     ]),
     ("Low", [
         "minor", "small", "slight", "faded", "worn", "thin",
         "narrow", "tiny", "superficial",
     ]),
 ]
+

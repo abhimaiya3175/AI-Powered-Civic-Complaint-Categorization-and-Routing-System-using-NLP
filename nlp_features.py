@@ -13,8 +13,13 @@ def build_multilingual_classification_text(
     """
     Build the text consumed by the classifier.
 
-    English translation stays first to preserve the legacy signal. The original
-    complaint is appended when it adds a distinct multilingual signal.
+    English translation comes first (strongest signal for the TF-IDF model).
+    The native-script original is appended so the model also sees civic
+    keywords like 'ಬೀದಿ ದೀಪ', 'ಗುಂಡಿ', 'गड्ढा', 'नाली' that survive
+    even when IndicTrans2 produces a garbled English output.
+
+    This makes the ML classifier consistent with the keyword-override layer
+    which already checks the original `transcribed_text` separately.
     """
     translated = normalize_feature_text(translated_english_text)
     original = normalize_feature_text(original_text)
@@ -23,7 +28,9 @@ def build_multilingual_classification_text(
         return translated
     if not translated:
         return original
+    # If translation equals original (English input), no need to duplicate
     if original.casefold() == translated.casefold():
         return translated
 
-    return translated
+    # Append native original — gives the classifier the benefit of both signals
+    return f"{translated} {original}"

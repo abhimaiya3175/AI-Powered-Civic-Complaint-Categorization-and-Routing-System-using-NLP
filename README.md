@@ -35,11 +35,27 @@
 
 ---
 
+## 📚 Documentation
+
+Detailed documentation and reports on the system's architecture, ML models, and workflow can be found in the `docs/` folder:
+
+- 📖 **[Technical Overview](docs/technical_overview.md)**: Outlines the React/FastAPI stack, multimodal AI models, and architecture.
+- ⚙️ **[Project Workflow](docs/project_workflow.md)**: A step-by-step flowchart and description of the data pipeline.
+- 📊 **[Complete Report](docs/complete_report.md)**: A comprehensive formal report including the abstract, objectives, methodology, and results.
+
+---
 ## 📁 Project Structure
 
 ```
 Civic Complaint/
-├── main.py                  # FastAPI backend (all endpoints)
+├── backend/                 # Modular FastAPI backend
+│   ├── main.py              # App entry & routing
+│   ├── api/                 # Endpoint definitions
+│   ├── core/                # Core configurations
+│   ├── models.py            # SQLAlchemy models
+│   ├── schemas.py           # Pydantic schemas
+│   ├── services/            # Business logic
+│   └── utils/               # Helpers & location logic
 ├── model_bbmp.pkl           # Trained TF-IDF + NB classifier
 ├── requirements.txt         # Python dependencies
 ├── Dockerfile               # Backend container image
@@ -70,21 +86,19 @@ Civic Complaint/
     ├── vite.config.js
     └── src/
         ├── main.jsx         # React entry point
-        ├── App.jsx          # Root component + routing
-        ├── components/
-        │   ├── Navbar.jsx                # Sticky navigation bar
-        │   ├── RecordComplaint.jsx       # Citizen voice capture page
-        │   ├── ComplaintList.jsx         # Admin dashboard page
-        │   └── AnalyticsDashboard.jsx    # NLP analytics & energy monitoring
-        ├── styles/
-        │   ├── index.css                 # Global design system (tokens)
-        │   ├── Navbar.css                # Navbar styles
-        │   ├── RecordComplaint.css       # Citizen portal styles
-        │   ├── ComplaintList.css         # Admin dashboard styles
-        │   └── AnalyticsDashboard.css    # Analytics dashboard styles
-        ├── services/
-        │   └── api.js                    # API client (fetch-based)
-        └── assets/                       # Static assets
+        ├── App.jsx          # Root component
+        ├── assets/          # Static assets
+        ├── components/      # Reusable UI components
+        │   ├── admin/
+        │   ├── common/
+        │   └── complaint/
+        ├── context/         # React contexts (e.g. AuthContext)
+        ├── hooks/           # Custom React hooks
+        ├── pages/           # Application views (Record, Admin, etc.)
+        ├── routes/          # Centralized routing
+        ├── services/        # Modular API clients (auth, complaints, etc.)
+        ├── styles/          # Global & component CSS
+        └── utils/           # Utility functions (formatters, storage)
 ```
 
 ---
@@ -145,7 +159,7 @@ python scripts/train_bbmp_model.py
 pip freeze > requirements.txt
 
 # Start the backend (recommended)
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
 > Backend runs at `http://localhost:8000`

@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 from PIL import Image
 
 from category_registry import (
+    CAPTION_CONTEXT_TO_CATEGORY,
     SEVERITY_KEYWORDS,
     VISUAL_KEYWORD_TO_CATEGORY,
 )
@@ -54,13 +55,43 @@ def _match_visual_category(labels: List[str]) -> Optional[str]:
     Iterates VISUAL_KEYWORD_TO_CATEGORY (longest-match first) and returns
     the first canonical category that matches any label.
     """
-    # Sort keywords by length descending so "road damage" matches before "road"
-    sorted_keywords = sorted(VISUAL_KEYWORD_TO_CATEGORY.keys(), key=len, reverse=True)
+    all_cats = _match_all_visual_categories(labels)
+    return all_cats[0]["category"] if all_cats else None
+
+
+def _match_all_visual_categories(labels: List[str]) -> List[Dict[str, Any]]:
+    """Match detected labels + captions to ALL relevant BBMP categories.
+
+    Returns a ranked list of {category, matched_keywords, score} dicts.
+    Checks both OD/region labels (VISUAL_KEYWORD_TO_CATEGORY) and
+    caption-context phrases (CAPTION_CONTEXT_TO_CATEGORY).
+    """
     combined = " ".join(label.lower() for label in labels)
-    for keyword in sorted_keywords:
+    category_hits: Dict[str, List[str]] = {}
+
+    # 1. Match object-detection / region-label keywords
+    sorted_od_kw = sorted(VISUAL_KEYWORD_TO_CATEGORY.keys(), key=len, reverse=True)
+    for keyword in sorted_od_kw:
         if keyword in combined:
-            return VISUAL_KEYWORD_TO_CATEGORY[keyword]
-    return None
+            cat = VISUAL_KEYWORD_TO_CATEGORY[keyword]
+            category_hits.setdefault(cat, []).append(keyword)
+
+    # 2. Match caption-context phrases (longer phrases first)
+    sorted_caption_kw = sorted(CAPTION_CONTEXT_TO_CATEGORY.keys(), key=len, reverse=True)
+    for phrase in sorted_caption_kw:
+        if phrase in combined:
+            cat = CAPTION_CONTEXT_TO_CATEGORY[phrase]
+            category_hits.setdefault(cat, []).append(phrase)
+
+    # Rank by number of matching keywords (more matches = higher confidence)
+    return sorted(
+        [
+            {"category": cat, "matched_keywords": kws, "score": len(kws)}
+            for cat, kws in category_hits.items()
+        ],
+        key=lambda x: x["score"],
+        reverse=True,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -104,13 +135,26 @@ def load_florence_model() -> bool:
     model_name = "microsoft/Florence-2-base"
     try:
         import torch
+        from transformers.configuration_utils import PretrainedConfig
+        if not hasattr(PretrainedConfig, 'forced_bos_token_id'):
+            PretrainedConfig.forced_bos_token_id = None
+
         logger.info("Loading Florence-2 model: %s …", model_name)
-        _florence_processor = AutoProcessor.from_pretrained(
-            model_name, trust_remote_code=True
-        )
-        _florence_model = AutoModelForCausalLM.from_pretrained(
-            model_name, trust_remote_code=True, torch_dtype=torch.float32
-        )
+        try:
+            _florence_processor = AutoProcessor.from_pretrained(
+                model_name, trust_remote_code=True, local_files_only=True
+            )
+            _florence_model = AutoModelForCausalLM.from_pretrained(
+                model_name, trust_remote_code=True, torch_dtype=torch.float32, local_files_only=True
+            )
+        except OSError:
+            logger.info("Florence-2 not in local cache, downloading from HuggingFace…")
+            _florence_processor = AutoProcessor.from_pretrained(
+                model_name, trust_remote_code=True
+            )
+            _florence_model = AutoModelForCausalLM.from_pretrained(
+                model_name, trust_remote_code=True, torch_dtype=torch.float32
+            )
         _florence_model.to("cpu")
         _florence_model.eval()
         _florence_load_attempted = True  # Only mark on success
@@ -212,18 +256,60 @@ def _run_florence_inference_sync(image_path: str) -> Dict[str, Any]:
 
     # Derive structured fields from grounding + captions
     all_labels = od_labels + region_labels + [caption, detailed_caption]
-    damaged_object = od_labels[0] if od_labels else None
-    suggested_category = _match_visual_category(all_labels)
 
-    # problem_type: the keyword that matched the category
+    # Multi-category matching: check OD labels AND caption context phrases
+    all_categories = _match_all_visual_categories(all_labels)
+    suggested_category = all_categories[0]["category"] if all_categories else None
+
+    # damaged_object: prefer a civic-meaningful label over raw COCO labels.
+    # Check if any OD label maps to a known civic category; if so, use a
+    # human-readable civic description. Otherwise fall back to the raw OD label.
+    _OD_CIVIC_MAP = {
+        "pothole": "Pothole / Road Damage",
+        "street light": "Street Light",
+        "garbage": "Garbage Pile",
+        "waste": "Waste Pile",
+        "sewage": "Sewage / Drain Overflow",
+        "drain": "Blocked Drain",
+        "flood": "Flooding / Waterlogging",
+        "hoarding": "Illegal Hoarding",
+        "dog": "Stray Dog",
+        "mosquito": "Mosquito Breeding",
+    }
+    damaged_object = None
+    for raw_label in od_labels:
+        civic = _OD_CIVIC_MAP.get(raw_label.lower().strip())
+        if civic:
+            damaged_object = civic
+            break
+    if damaged_object is None and od_labels:
+        # No civic map hit — use top matched keyword as civic description
+        if all_categories:
+            top_kws = all_categories[0]["matched_keywords"]
+            damaged_object = top_kws[0].replace(" of water covering", "").replace(" the ground", "").title() if top_kws else od_labels[0]
+        else:
+            damaged_object = od_labels[0]  # raw COCO label as last resort
+
+    # problem_type: canonical BBMP category name (human-readable), not a raw phrase
+    # matched_evidence: the raw keyword phrase that triggered detection
     problem_type = None
-    if suggested_category:
-        combined_labels = " ".join(l.lower() for l in all_labels)
-        sorted_kw = sorted(VISUAL_KEYWORD_TO_CATEGORY.keys(), key=len, reverse=True)
-        for kw in sorted_kw:
-            if kw in combined_labels and VISUAL_KEYWORD_TO_CATEGORY[kw] == suggested_category:
-                problem_type = kw
-                break
+    matched_evidence = None
+    if all_categories:
+        problem_type = all_categories[0]["category"]  # e.g. "Drainage / SWD"
+        matched_evidence = all_categories[0]["matched_keywords"][0] if all_categories[0]["matched_keywords"] else None
+
+    # Civic fallback: if no phrases matched but caption mentions road/street/vehicle,
+    # the image is likely civic-relevant — return "Others" instead of None.
+    if suggested_category is None:
+        _fallback_cues = ["road", "street", "vehicle", "pothole", "drain", "water", "garbage",
+                          "light", "building", "construction", "park", "dog", "mosquito"]
+        combined_lower = (caption + " " + detailed_caption).lower()
+        if any(cue in combined_lower for cue in _fallback_cues):
+            suggested_category = "Others"
+            problem_type = "Others"
+            matched_evidence = "generic civic scene detected"
+            if damaged_object is None and od_labels:
+                damaged_object = od_labels[0]
 
     # Severity from caption text (explicit rule layer)
     severity = compute_caption_severity(caption, detailed_caption)
@@ -237,7 +323,9 @@ def _run_florence_inference_sync(image_path: str) -> Dict[str, Any]:
         "supporting_evidence": detailed_caption,
         "damaged_object": damaged_object,
         "problem_type": problem_type,
+        "matched_evidence": matched_evidence,
         "suggested_category": suggested_category,
+        "all_suggested_categories": all_categories,
         "severity": severity,
         "detections": od_detections,
         "processing_time": processing_time,

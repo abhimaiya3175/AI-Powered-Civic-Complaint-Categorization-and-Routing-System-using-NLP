@@ -1,27 +1,22 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Navbar from './components/Navbar';
-import RecordComplaint from './components/RecordComplaint';
-import ComplaintList from './components/ComplaintList';
-import UserComplaints from './components/UserComplaints';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
+import { BrowserRouter as Router } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import Navbar from './components/common/Navbar';
+import { AppRoutes } from './routes/AppRoutes';
 
 function App() {
   return (
-    <Router>
-      <div id="app-shell">
-        <Navbar />
-        <main className="page">
-          <div className="container">
-            <Routes>
-              <Route path="/" element={<RecordComplaint />} />
-              <Route path="/complaints" element={<UserComplaints />} />
-              <Route path="/admin" element={<ComplaintList />} />
-              <Route path="/analytics" element={<AnalyticsDashboard />} />
-            </Routes>
-          </div>
-        </main>
-      </div>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <div id="app-shell">
+          <Navbar />
+          <main className="page">
+            <div className="container">
+              <AppRoutes />
+            </div>
+          </main>
+        </div>
+      </Router>
+    </AuthProvider>
   );
 }
 

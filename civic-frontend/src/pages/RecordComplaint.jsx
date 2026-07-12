@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import piexif from 'piexifjs';
-import { submitComplaint, getVoterFingerprint } from '../services/api';
+import { submitComplaint } from '../services/uploadService';
+import { getVoterFingerprint } from '../utils/storage';
 import '../styles/RecordComplaint.css';
 import { useNavigate } from 'react-router-dom';
 
@@ -656,7 +657,7 @@ export default function RecordComplaint() {
   
             {result.category_explanation && (
               <div className="result-transcript explanation-card" style={{ borderLeft: '4px solid var(--primary-color)', paddingLeft: '15px' }}>
-                <span className="result-label">Step 3: ML Prediction ({result.category_explanation?.method === 'zero_shot_nli_fallback' ? 'Semantic NLI Zero-Shot' : 'TF-IDF + Naive Bayes'})</span>
+                <span className="result-label">Step 3: ML Prediction ({result.category_explanation?.method === 'zero_shot_nli_fallback' ? 'Semantic NLI Zero-Shot' : result.category_explanation?.method === 'keyword_override' ? 'Keyword Override' : 'TF-IDF + Naive Bayes'})</span>
                 <p className="explanation-meta">
                   Confidence: {formatConfidence(result.category_explanation?.confidence)}
                 </p>
@@ -673,6 +674,28 @@ export default function RecordComplaint() {
                         {feature.term} ({feature.importance_percent}%)
                       </span>
                     ))}
+                  </div>
+                )}
+                {result.decision_path && (
+                  <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.7rem', color: '#888', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Decision:</span>
+                    <span style={{
+                      fontSize: '0.75rem', fontFamily: 'monospace',
+                      background: result.decision_path.startsWith('keyword') ? '#e8f5e9' :
+                                  result.decision_path.startsWith('zero_shot') ? '#fff8e1' : '#e3f2fd',
+                      color: result.decision_path.startsWith('keyword') ? '#2e7d32' :
+                             result.decision_path.startsWith('zero_shot') ? '#f57c00' : '#1565c0',
+                      padding: '0.2rem 0.5rem', borderRadius: '0.25rem', fontWeight: '600'
+                    }}>
+                      {result.decision_path}
+                    </span>
+                  </div>
+                )}
+                {result.translation_quality && result.translation_quality !== 'good' && (
+                  <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.6rem', background: '#fff3e0', borderRadius: '0.25rem', fontSize: '0.8rem', color: '#e65100' }}>
+                    ⚠️ {result.translation_quality === 'low'
+                      ? 'Translation quality was low — classification used the original text keywords.'
+                      : 'Translation was corrected using the civic glossary before classification.'}
                   </div>
                 )}
               </div>

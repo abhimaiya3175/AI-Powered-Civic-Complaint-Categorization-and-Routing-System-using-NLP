@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "chart.js": "^4.5.1",
+    "framer-motion": "^12.42.2",
     "leaflet": "^1.9.4",
+    "lucide-react": "^1.24.0",
     "piexifjs": "^1.0.6",
     "react": "^19.2.4",
     "react-chartjs-2": "^5.3.1",

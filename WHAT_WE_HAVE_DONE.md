@@ -95,7 +95,6 @@ The main components are located across the workspace:
 ---
 
 ## 🧪 Verification & Automated Testing
-
 Three comprehensive integration test suites have been implemented in the `tests/` directory:
 
 1. **[test_analytics.py](file:///e:/ProJect/Civic%20Complaint/tests/test_analytics.py)**:
@@ -119,7 +118,7 @@ venv\Scripts\python tests/test_classification.py
 # Run multilingual pipeline validation
 venv\Scripts\python tests/test_ml_model_and_languages.py
 
-# Run multi-class image detection and reconciliation logic tests
+# Run multi-class image detection and reconciliation logic test
 venv\Scripts\python -m pytest tests/test_image_detection.py
 ```
 

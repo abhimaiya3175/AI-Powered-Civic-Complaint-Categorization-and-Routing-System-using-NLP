@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { loginAdmin, getAnalyticsDashboard } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
+import { getAnalyticsDashboard } from '../services/analyticsService';
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement,
   PointElement, ArcElement, RadialLinearScale, Filler, Tooltip, Legend, Title,
@@ -38,14 +39,11 @@ const fmt = (v, d = 2) => v == null ? '—' : typeof v === 'number' ? (v >= 1000
 
 const isAuthError = (err) => {
   const m = String(err?.message || '').toLowerCase();
-  return m.includes('401') || m.includes('token') || m.includes('log in');
+  return m.includes('401') || m.includes('token') || m.includes('log in') || m.includes('unauthorized');
 };
 
 export default function AnalyticsDashboard() {
-  const [token, setToken] = useState(localStorage.getItem('bbmp_token') || '');
-  const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem('bbmp_token'));
-  const [loginError, setLoginError] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
+  const { token, logout, isAuthenticated } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -54,71 +52,24 @@ export default function AnalyticsDashboard() {
   const [langFilter, setLangFilter] = useState('');
   const [verifyOpen, setVerifyOpen] = useState(false);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    const form = e.target;
-    setLoginError(''); setLoginLoading(true);
-    try {
-      const res = await loginAdmin(form.username.value, form.password.value);
-      setToken(res.access_token);
-      localStorage.setItem('bbmp_token', res.access_token);
-      setLoggedIn(true);
-    } catch (err) { setLoginError(err.message); }
-    setLoginLoading(false);
-  };
-
-  const handleLogout = useCallback(() => {
-    setToken(''); localStorage.removeItem('bbmp_token');
-    setLoggedIn(false); setData(null);
-  }, []);
-
   const fetchData = useCallback(async () => {
+    if (!token) return;
     setLoading(true); setError('');
     try {
       const res = await getAnalyticsDashboard(token, { startDate, endDate, language: langFilter });
       setData(res);
     } catch (err) {
-      if (isAuthError(err)) handleLogout();
+      if (isAuthError(err)) logout();
       else setError(err.message);
     }
     setLoading(false);
-  }, [token, startDate, endDate, langFilter, handleLogout]);
+  }, [token, startDate, endDate, langFilter, logout]);
 
-  useEffect(() => { if (loggedIn) fetchData(); }, [loggedIn, fetchData]);
+  useEffect(() => { if (isAuthenticated) fetchData(); }, [isAuthenticated, fetchData]);
 
   /* ── Login Screen ──────────────────────────────────────────── */
-  if (!loggedIn) {
-    return (
-      <div className="login-wrapper gravless-container">
-        <div className="login-card">
-          <div className="login-header">
-            <div className="login-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
-                <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
-                <path d="M18 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/>
-              </svg>
-            </div>
-            <h2>NLP Analytics</h2>
-            <p className="login-subtext">Sign in to view system analytics</p>
-          </div>
-          <form onSubmit={handleLogin} className="login-form">
-            <div className="form-group">
-              <label htmlFor="a-username" className="form-label">Username</label>
-              <input id="a-username" name="username" className="input" placeholder="Enter username" required autoComplete="username" />
-            </div>
-            <div className="form-group">
-              <label htmlFor="a-password" className="form-label">Password</label>
-              <input id="a-password" name="password" type="password" className="input" placeholder="Enter password" required autoComplete="current-password" />
-            </div>
-            {loginError && <div className="login-error">{loginError}</div>}
-            <button type="submit" className="btn btn-primary btn-lg login-btn" disabled={loginLoading}>
-              {loginLoading ? <><span className="spinner" /> Signing in…</> : 'Sign In'}
-            </button>
-          </form>
-        </div>
-      </div>
-    );
+  if (!isAuthenticated) {
+    return null; // ProtectedRoute will handle redirection to /admin/login
   }
 
   /* ── Loading ────────────────────────────────────────────────── */
@@ -316,7 +267,7 @@ export default function AnalyticsDashboard() {
           <button className="btn btn-secondary btn-sm" onClick={fetchData} disabled={loading}>
             {loading ? <><span className="spinner" /> Refreshing…</> : '🔄 Refresh'}
           </button>
-          <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Logout</button>
+          <button className="btn btn-ghost btn-sm" onClick={logout}>Logout</button>
         </div>
       </div>
 

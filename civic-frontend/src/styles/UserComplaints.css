@@ -312,6 +312,35 @@
   border-color: rgba(16,185,129,0.3);
 }
 
+/* ── Priority Styles ────────────────────────────────────────────── */
+.uc-card-critical {
+  border: 1.5px solid rgba(220, 38, 38, 0.35) !important;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.08), 0 4px 24px rgba(220, 38, 38, 0.10) !important;
+}
+.uc-card-high {
+  border: 1.5px solid rgba(234, 88, 12, 0.3) !important;
+  box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.07), 0 4px 18px rgba(234, 88, 12, 0.08) !important;
+}
+.uc-priority-badge {
+  font-size: 0.68rem; font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+.uc-priority-badge.critical {
+  background: linear-gradient(135deg, #FEE2E2, #FECACA);
+  color: #7F1D1D; border: 1px solid #FCA5A5;
+  animation: pulse-critical 1.5s ease-in-out infinite;
+}
+.uc-priority-badge.high {
+  background: linear-gradient(135deg, #FFEDD5, #FED7AA);
+  color: #7C2D12; border: 1px solid #FDBA74;
+}
+.uc-priority-badge.medium {
+  background: linear-gradient(135deg, #FEF3C7, #FDE68A);
+  color: #92400E; border: 1px solid #FCD34D;
+}
+
 /* Accent stripe */
 .uc-card-accent {
   position: absolute;

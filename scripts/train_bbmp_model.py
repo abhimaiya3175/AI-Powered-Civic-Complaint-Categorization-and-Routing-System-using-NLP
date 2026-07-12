@@ -217,11 +217,84 @@ road_native_augmentation_rows = [
     },
 ]
 
+# ── Augmentation for underrepresented categories ─────────────────────
+# Traffic (296 real samples), Water Supply (700), Drainage (1677),
+# Revenue (1062), Advertisement (854), Parks (1130), Town Planning (1813)
+underrepresented_augmentation_rows = [
+    # ── Traffic (most underrepresented: 296 real samples) ────────────
+    {"Sub Category": "traffic signal not working at junction", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    {"Sub Category": "traffic jam every day during peak hours", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    {"Sub Category": "no traffic signal at busy intersection", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    {"Sub Category": "traffic police needed at school crossing", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    {"Sub Category": "broken traffic signal causing accidents", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    {"Sub Category": "vehicles parked illegally blocking traffic flow", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    {"Sub Category": "speed breaker missing on busy road causing speeding", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    {"Sub Category": "traffic congestion due to road narrowing", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    {"Sub Category": "ट्रैफिक सिग्नल खराब है चौराहे पर", "Translated English": "traffic signal broken at intersection", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    {"Sub Category": "ಟ್ರಾಫಿಕ್ ಸಿಗ್ನಲ್ ಕೆಟ್ಟಿದೆ ಜಂಕ್ಷನ್ ಬಳಿ", "Translated English": "traffic signal broken near junction", "Category": "Traffic Engineer Cell (TEC)", "target": "Traffic"},
+    # ── Water Supply (700 real samples) ──────────────────────────────
+    {"Sub Category": "no water supply in our area for two days", "Category": "Water Crisis", "target": "Water Supply"},
+    {"Sub Category": "water not coming from tap pipeline issue", "Category": "Water Crisis", "target": "Water Supply"},
+    {"Sub Category": "water pipeline burst leaking water everywhere", "Category": "Water Crisis", "target": "Water Supply"},
+    {"Sub Category": "contaminated water coming from corporation tap", "Category": "Water Crisis", "target": "Water Supply"},
+    {"Sub Category": "low water pressure in our locality", "Category": "Water Crisis", "target": "Water Supply"},
+    {"Sub Category": "water supply timing is irregular and insufficient", "Category": "Water Crisis", "target": "Water Supply"},
+    {"Sub Category": "पानी सप्लाई बंद है दो दिन से", "Translated English": "water supply stopped for two days", "Category": "Water Crisis", "target": "Water Supply"},
+    {"Sub Category": "ನೀರು ಸರಬರಾಜು ಇಲ್ಲ ಎರಡು ದಿನ", "Translated English": "no water supply for two days", "Category": "Water Crisis", "target": "Water Supply"},
+    # ── Drainage / SWD (1677 real samples) ───────────────────────────
+    {"Sub Category": "drainage blocked and sewage overflowing onto road", "Category": "Storm  Water Drain(SWD)", "target": "Drainage / SWD"},
+    {"Sub Category": "storm water drain clogged causing flooding", "Category": "Storm  Water Drain(SWD)", "target": "Drainage / SWD"},
+    {"Sub Category": "road flooded due to blocked drainage", "Category": "Storm  Water Drain(SWD)", "target": "Drainage / SWD"},
+    {"Sub Category": "sewage water stagnating near houses bad smell", "Category": "Storm  Water Drain(SWD)", "target": "Drainage / SWD"},
+    {"Sub Category": "waterlogging on main road after rain", "Category": "Storm  Water Drain(SWD)", "target": "Drainage / SWD"},
+    {"Sub Category": "open manhole cover missing near drain", "Category": "Storm  Water Drain(SWD)", "target": "Drainage / SWD"},
+    {"Sub Category": "नाली बंद है गंदा पानी सड़क पर", "Translated English": "drain blocked dirty water on road", "Category": "Storm  Water Drain(SWD)", "target": "Drainage / SWD"},
+    {"Sub Category": "ಚರಂಡಿ ಬ್ಲಾಕ್ ಆಗಿ ನೀರು ರಸ್ತೆಗೆ", "Translated English": "drain blocked water on road", "Category": "Storm  Water Drain(SWD)", "target": "Drainage / SWD"},
+    # ── Revenue (1062 real samples) ──────────────────────────────────
+    {"Sub Category": "property tax khata transfer not done", "Category": "Revenue Department", "target": "Revenue"},
+    {"Sub Category": "khata certificate application pending since months", "Category": "Revenue Department", "target": "Revenue"},
+    {"Sub Category": "property tax bill incorrect need correction", "Category": "Revenue Department", "target": "Revenue"},
+    {"Sub Category": "mutation of property records not updated", "Category": "Revenue Department", "target": "Revenue"},
+    {"Sub Category": "ಖಾತಾ ವರ್ಗಾವಣೆ ಆಗಿಲ್ಲ", "Translated English": "khata transfer not done", "Category": "Revenue Department", "target": "Revenue"},
+    {"Sub Category": "खाता ट्रांसफर नहीं हुआ", "Translated English": "khata transfer not done", "Category": "Revenue Department", "target": "Revenue"},
+    # ── Advertisement (854 real samples) ─────────────────────────────
+    {"Sub Category": "illegal advertisement hoarding on footpath", "Category": "Advertisement", "target": "Advertisement"},
+    {"Sub Category": "unauthorized flex banners blocking road view", "Category": "Advertisement", "target": "Advertisement"},
+    {"Sub Category": "illegal posters pasted on public walls", "Category": "Advertisement", "target": "Advertisement"},
+    {"Sub Category": "commercial billboard without permission near school", "Category": "Advertisement", "target": "Advertisement"},
+    {"Sub Category": "ಅಕ್ರಮ ಜಾಹೀರಾತು ಹೋರ್ಡಿಂಗ್", "Translated English": "illegal advertisement hoarding", "Category": "Advertisement", "target": "Advertisement"},
+    {"Sub Category": "अवैध विज्ञापन होर्डिंग", "Translated English": "illegal advertisement hoarding", "Category": "Advertisement", "target": "Advertisement"},
+    # ── Parks (1130 real samples) ────────────────────────────────────
+    {"Sub Category": "park playground swings are broken dangerous for children", "Category": "Parks and Play grounds", "target": "Parks"},
+    {"Sub Category": "public park not maintained grass overgrown", "Category": "Parks and Play grounds", "target": "Parks"},
+    {"Sub Category": "park benches broken and lights not working", "Category": "Parks and Play grounds", "target": "Parks"},
+    {"Sub Category": "playground equipment rusted needs replacement", "Category": "Parks and Play grounds", "target": "Parks"},
+    {"Sub Category": "ಉದ್ಯಾನವನ ಹಾಳಾಗಿದೆ ಮಕ್ಕಳ ಆಟ ಸಾಮಗ್ರಿ ಮುರಿದಿವೆ", "Translated English": "park damaged children playground equipment broken", "Category": "Parks and Play grounds", "target": "Parks"},
+    {"Sub Category": "पार्क खराब हालत में है झूले टूटे", "Translated English": "park in bad condition swings broken", "Category": "Parks and Play grounds", "target": "Parks"},
+    # ── Town Planning (1813 real samples) ────────────────────────────
+    {"Sub Category": "unauthorized building construction in residential area", "Category": "Town Planning", "target": "Town Planning"},
+    {"Sub Category": "illegal commercial construction without building plan approval", "Category": "Town Planning", "target": "Town Planning"},
+    {"Sub Category": "encroachment on public footpath by shop owner", "Category": "Town Planning", "target": "Town Planning"},
+    {"Sub Category": "building violating setback norms in our layout", "Category": "Town Planning", "target": "Town Planning"},
+    {"Sub Category": "ಅನಧಿಕೃತ ಕಟ್ಟಡ ನಿರ್ಮಾಣ", "Translated English": "unauthorized building construction", "Category": "Town Planning", "target": "Town Planning"},
+    {"Sub Category": "अवैध निर्माण बिना अनुमति", "Translated English": "illegal construction without permission", "Category": "Town Planning", "target": "Town Planning"},
+    # ── Non-Civic (0 real samples, only synthetic) ───────────────────
+    {"Sub Category": "what is the score of the cricket match today", "Category": "Non-Civic", "target": "Non-Civic"},
+    {"Sub Category": "i want to book a movie ticket for tonight", "Category": "Non-Civic", "target": "Non-Civic"},
+    {"Sub Category": "where is the nearest good restaurant", "Category": "Non-Civic", "target": "Non-Civic"},
+    {"Sub Category": "how is the weather looking for tomorrow", "Category": "Non-Civic", "target": "Non-Civic"},
+    {"Sub Category": "my phone internet is very slow", "Category": "Non-Civic", "target": "Non-Civic"},
+    {"Sub Category": "आज क्रिकेट का क्या स्कोर है", "Translated English": "what is the cricket score today", "Category": "Non-Civic", "target": "Non-Civic"},
+    {"Sub Category": "ನನಗೆ ಸಿನಿಮಾ ಟಿಕೆಟ್ ಬೇಕು", "Translated English": "i want a movie ticket", "Category": "Non-Civic", "target": "Non-Civic"},
+]
+
 augmentation_data = pd.DataFrame(
     (english_augmentation_rows * 50)
     + (multilingual_augmentation_rows * 30)
     + (road_native_augmentation_rows * 80)
+    + (underrepresented_augmentation_rows * 100)  # Heavy augmentation for underrepresented categories
 )
+
 
 augmentation_data[TEXT_COLUMN] = augmentation_data["Sub Category"].apply(clean_text)
 augmentation_data[TRANSLATED_TEXT_COLUMN] = augmentation_data.get(

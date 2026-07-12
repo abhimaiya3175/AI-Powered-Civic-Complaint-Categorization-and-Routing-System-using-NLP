@@ -81,6 +81,6 @@ Kannadadata/
 civic-frontend/bottom_part.txt
 civic-frontend/extract_bottom.py
 civic-frontend/extract_recover.py
-projectworkflow.md
-test_endpoints.py
 scripts/cleanup_test_complaints.py
+scratch/
+.gemini/

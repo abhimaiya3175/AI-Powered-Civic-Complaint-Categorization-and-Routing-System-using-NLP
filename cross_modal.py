@@ -76,27 +76,39 @@ def verify_cross_modal(
         )
         return result
 
+    # Collect all image-suggested categories for multi-match
+    all_image_categories = [
+        c["category"]
+        for c in image_result.get("all_suggested_categories", [])
+        if isinstance(c, dict) and c.get("category")
+    ]
+    if image_category and image_category not in all_image_categories:
+        all_image_categories.insert(0, image_category)
+    result["all_image_categories"] = all_image_categories
+
     # Validate both categories are canonical
     if nlp_category not in CANONICAL_CATEGORIES:
         logger.warning(
             "Cross-modal: NLP category '%s' not in canonical list", nlp_category
         )
-    if image_category not in CANONICAL_CATEGORIES:
-        logger.warning(
-            "Cross-modal: image category '%s' not in canonical list",
-            image_category,
-        )
+    for img_cat in all_image_categories:
+        if img_cat not in CANONICAL_CATEGORIES:
+            logger.warning(
+                "Cross-modal: image category '%s' not in canonical list",
+                img_cat,
+            )
 
-    # Compare
-    if nlp_category == image_category:
+    # Compare — NLP category matches if it appears in ANY of the image categories
+    if nlp_category == image_category or nlp_category in all_image_categories:
         result["categories_match"] = True
         result["verification_result"] = "match"
         result["trust_level"] = "high"
         result["manual_review_required"] = False
         logger.info(
-            "Cross-modal MATCH: NLP=%s, Image=%s → trust=high",
+            "Cross-modal MATCH: NLP=%s, Image=%s (all=%s) → trust=high",
             nlp_category,
             image_category,
+            all_image_categories,
         )
     else:
         result["categories_match"] = False
@@ -104,9 +116,10 @@ def verify_cross_modal(
         result["trust_level"] = "manual_review"
         result["manual_review_required"] = True
         logger.info(
-            "Cross-modal MISMATCH: NLP=%s, Image=%s → trust=manual_review",
+            "Cross-modal MISMATCH: NLP=%s, Image=%s (all=%s) → trust=manual_review",
             nlp_category,
             image_category,
+            all_image_categories,
         )
 
     return result
